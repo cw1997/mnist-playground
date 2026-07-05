@@ -438,6 +438,26 @@ def model_backward(probs, y_true, params, cache):
 
 反向傳播只有兩層全連接 + 一個 ReLU，是理解鏈式法則最簡單的起點。學會後再讀 CNN 版，只需額外理解卷積與池化的 forward／backward。
 
+**`cross_entropy_loss` 逐步拆解**
+
+交叉熵需要取出「每張圖對**正確數字**的預測機率」，再用 `-ln` 衡量差距。最難懂的是 NumPy 的**高級索引**——用兩組索引同時指定列與欄：
+
+```python
+def cross_entropy_loss(probs, y_true):
+    batch = y_true.shape[0]              # shape[0]：這批有幾張圖
+    row_idx = np.arange(batch)           # [0, 1, ..., batch-1]
+    true_labels = np.argmax(y_true, axis=1)  # one-hot → 正確數字 0~9
+    correct_probs = probs[row_idx, true_labels]  # 每張圖取正確類別的機率
+    return float(-np.sum(np.log(correct_probs + 1e-12)) / batch)
+```
+
+| 步驟 | 白話 |
+|------|------|
+| `row_idx` | 第 0 張圖看第 0 列、第 1 張看第 1 列…… |
+| `true_labels` | 從 one-hot 找出 1 在哪一欄，即正確答案 |
+| `probs[row_idx, true_labels]` | 同時用列號 + 欄號，一次取出所有正確機率 |
+| `1e-12` | 避免機率為 0 時 `log(0)` 出錯 |
+
 #### 設計要點
 
 1. **先 MLP 後 CNN**：把 784 個像素直接當特徵，讓讀者專注於梯度下降與反向傳播，不被卷積細節分散注意力。
