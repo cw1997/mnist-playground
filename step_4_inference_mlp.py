@@ -15,14 +15,14 @@ import numpy as np
 from PIL import Image
 
 # === 設定常數 ===
-DEFAULT_IMAGE = "test.png"
-MODELS_DIR = "models"
-DEFAULT_WEIGHTS = f"{MODELS_DIR}/mlp.npz"
+DEFAULT_IMAGE = "test.png"  # 預設待推理的圖片路徑
+MODELS_DIR = "models"  # step 3 訓練產出的權重目錄
+DEFAULT_WEIGHTS = f"{MODELS_DIR}/mlp.npz"  # 預設 MLP 權重檔
 
-NUM_CLASSES = 10
-INPUT_SIZE = 28 * 28
-HIDDEN_SIZE = 128
-IMAGE_SIZE = (28, 28)
+NUM_CLASSES = 10  # MNIST 有 10 個類別（數字 0～9）
+INPUT_SIZE = 28 * 28  # 28×28 灰階圖展平後的輸入維度（784）
+HIDDEN_SIZE = 128  # 全連接隱藏層維度（與 step 3 一致）
+IMAGE_SIZE = (28, 28)  # 推理前將圖片縮放為 28×28
 
 
 # === 圖片前處理 ===
@@ -33,13 +33,14 @@ def load_image_as_tensor(path: str) -> tuple[np.ndarray, tuple[int, int], str]:
     讀取 PNG 等圖片，轉成與 step 3 訓練相同的張量格式。
     回傳：(1, 1, 28, 28) 張量、原始尺寸、PIL 模式。
     """
-    with Image.open(path) as img:
-        original_size = img.size
-        mode = img.mode
-        gray = img.convert("L")
-        resized = gray.resize(IMAGE_SIZE, Image.LANCZOS)
-        pixels = np.asarray(resized, dtype=np.float64) / 255.0
-    tensor = pixels.reshape(1, 1, IMAGE_SIZE[1], IMAGE_SIZE[0])
+    with Image.open(path) as img:  # Image.open：讀取 PNG 等圖片檔
+        original_size = img.size  # size：原始 (寬, 高)，供終端顯示
+        mode = img.mode  # mode：色彩模式，如 RGB、L（灰階）
+        gray = img.convert("L")  # convert("L")：轉成灰階（L = luminance 亮度）
+        resized = gray.resize(IMAGE_SIZE, Image.LANCZOS)  # resize：縮放至 28×28；LANCZOS 高品質插值
+        raw_pixels = np.asarray(resized, dtype=np.float64)  # asarray：PIL 圖轉 NumPy 陣列
+        pixels = raw_pixels / 255.0  # 除以 255，正規化到 0~1（與 step 3 訓練一致）
+    tensor = pixels.reshape(1, 1, IMAGE_SIZE[1], IMAGE_SIZE[0])  # reshape：→ (1, 1, 28, 28)
     return tensor, original_size, mode
 
 
@@ -48,10 +49,10 @@ def load_image_as_tensor(path: str) -> tuple[np.ndarray, tuple[int, int], str]:
 
 def load_params(path: str) -> dict:
     """從 .npz 還原 MLP 的 params 字典（僅 W、b，不含梯度）。"""
-    data = np.load(path)
+    data = np.load(path)  # load：讀取 .npz 壓縮檔，回傳類似字典的物件
     return {
-        "fc1": {"W": data["fc1_W"], "b": data["fc1_b"]},
-        "fc2": {"W": data["fc2_W"], "b": data["fc2_b"]},
+        "fc1": {"W": data["fc1_W"], "b": data["fc1_b"]},  # fc1：784→128 全連接層權重
+        "fc2": {"W": data["fc2_W"], "b": data["fc2_b"]},  # fc2：128→10 全連接層權重
     }
 
 
@@ -60,14 +61,15 @@ def load_params(path: str) -> dict:
 
 def relu(x: np.ndarray) -> np.ndarray:
     """ReLU 激活：max(0, x)。"""
-    return np.maximum(0, x)
+    return np.maximum(0, x)  # maximum：逐元素取較大值，向量化實作 ReLU
 
 
 def softmax(x: np.ndarray) -> np.ndarray:
     """對每個樣本的 10 個類別分數做 softmax，回傳機率。"""
-    shifted = x - np.max(x, axis=1, keepdims=True)
-    exp_x = np.exp(shifted)
-    return exp_x / np.sum(exp_x, axis=1, keepdims=True)
+    shifted = x - np.max(x, axis=1, keepdims=True)  # max：axis=1 每列取最大；keepdims 保留維度方便相減
+    exp_x = np.exp(shifted)  # exp：對每個分數取 e 的次方
+    sum_exp = np.sum(exp_x, axis=1, keepdims=True)  # sum：axis=1 每列加總，keepdims 保留維度方便相除
+    return exp_x / sum_exp  # 逐元素相除，每列機率加總為 1
 
 
 # === 全連接層 ===
@@ -75,7 +77,8 @@ def softmax(x: np.ndarray) -> np.ndarray:
 
 def dense_forward(x: np.ndarray, params: dict) -> np.ndarray:
     """全連接前向傳播：y = x @ W + b"""
-    return x @ params["W"] + params["b"]
+    out = x @ params["W"]  # @：矩陣乘法 (batch, in) × (in, out)
+    return out + params["b"]  # 加上偏置 b，shape (out,)
 
 
 # === MLP 前向推理（含進度輸出）===
@@ -86,17 +89,17 @@ def model_forward_verbose(x: np.ndarray, params: dict) -> np.ndarray:
     MLP 前向傳播並印出各層 shape。
     架構：展平 → FC(128) → ReLU → FC(10) → Softmax
     """
-    flat = x.reshape(x.shape[0], -1)
+    flat = x.reshape(x.shape[0], -1)  # reshape：-1 表示其餘維度自動計算 → (batch, 784)
     print(f"      Flatten     → shape {flat.shape}")
 
-    f1 = dense_forward(flat, params["fc1"])
-    r1 = relu(f1)
+    f1 = dense_forward(flat, params["fc1"])  # fc1：784→128 線性變換
+    r1 = relu(f1)  # ReLU：負值歸零，保留正特徵
     print(f"      FC128+ReLU  → shape {r1.shape}")
 
-    logits = dense_forward(r1, params["fc2"])
+    logits = dense_forward(r1, params["fc2"])  # fc2：128→10，輸出 10 個類別分數
     print(f"      FC10 logits → shape {logits.shape}")
 
-    probs = softmax(logits)
+    probs = softmax(logits)  # Softmax：10 個分數轉成機率（加總為 1）
     print("      Softmax     → done")
     return probs
 
@@ -106,12 +109,12 @@ def model_forward_verbose(x: np.ndarray, params: dict) -> np.ndarray:
 
 def print_probs(probs: np.ndarray) -> tuple[int, float]:
     """印出 0～9 各類機率（百分比），回傳預測數字與置信度。"""
-    row = probs[0]
+    row = probs[0]  # 取第一筆樣本（batch=1）的 10 類機率
     for digit in range(NUM_CLASSES):
         print(f"      Digit {digit}: {row[digit] * 100:6.2f}%")
 
-    pred = int(np.argmax(row))
-    confidence = float(row[pred])
+    pred = int(np.argmax(row))  # argmax：10 個機率中取最大值 index → 預測數字
+    confidence = float(row[pred])  # 取出預測類別的機率值
     print(f"      Predicted digit: {pred}")
     print(f"      Confidence:      {confidence * 100:.2f}%")
     return pred, confidence

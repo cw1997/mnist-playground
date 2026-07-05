@@ -15,20 +15,20 @@ import numpy as np
 from PIL import Image
 
 # === 設定常數 ===
-DEFAULT_IMAGE = "test.png"
-MODELS_DIR = "models"
-DEFAULT_WEIGHTS = f"{MODELS_DIR}/cnn.npz"
+DEFAULT_IMAGE = "test.png"  # 預設待推理的圖片路徑
+MODELS_DIR = "models"  # step 3 訓練產出的權重目錄
+DEFAULT_WEIGHTS = f"{MODELS_DIR}/cnn.npz"  # 預設 CNN 權重檔
 
-NUM_CLASSES = 10
-IMAGE_SIZE = (28, 28)
+NUM_CLASSES = 10  # MNIST 有 10 個類別（數字 0～9）
+IMAGE_SIZE = (28, 28)  # 推理前將圖片縮放為 28×28
 
 # 與 step_3_train_cnn.py 一致的前處理與卷積超參數
-MNIST_MEAN = 0.1307
-CONV_IN_CHANNELS = 1
-CONV_OUT_CHANNELS = 16
-CONV_KERNEL_SIZE = 3
-CONV_STRIDE = 1
-CONV_PADDING = 1
+MNIST_MEAN = 0.1307  # 訓練集像素均值（÷255 後）；推理時也要減去
+CONV_IN_CHANNELS = 1  # 輸入 1 個通道（灰階）
+CONV_OUT_CHANNELS = 16  # 第一層卷積輸出 16 個特徵通道
+CONV_KERNEL_SIZE = 3  # 卷積核 3×3
+CONV_STRIDE = 1  # 步幅 1：每次移動 1 格
+CONV_PADDING = 1  # 四周補 1 圈 0
 
 
 # === 圖片前處理 ===
@@ -39,13 +39,15 @@ def load_image_as_tensor(path: str) -> tuple[np.ndarray, tuple[int, int], str]:
     讀取 PNG 等圖片，轉成與 step 3 訓練相同的張量格式。
     回傳：(1, 1, 28, 28) 張量、原始尺寸、PIL 模式。
     """
-    with Image.open(path) as img:
-        original_size = img.size
-        mode = img.mode
-        gray = img.convert("L")
-        resized = gray.resize(IMAGE_SIZE, Image.LANCZOS)
-        pixels = np.asarray(resized, dtype=np.float64) / 255.0 - MNIST_MEAN
-    tensor = pixels.reshape(1, 1, IMAGE_SIZE[1], IMAGE_SIZE[0])
+    with Image.open(path) as img:  # Image.open：讀取 PNG 等圖片檔
+        original_size = img.size  # size：原始 (寬, 高)，供終端顯示
+        mode = img.mode  # mode：色彩模式，如 RGB、L（灰階）
+        gray = img.convert("L")  # convert("L")：轉成灰階（L = luminance 亮度）
+        resized = gray.resize(IMAGE_SIZE, Image.LANCZOS)  # resize：縮放至 28×28；LANCZOS 高品質插值
+        raw_pixels = np.asarray(resized, dtype=np.float64)  # asarray：PIL 圖轉 NumPy 陣列
+        normalized = raw_pixels / 255.0  # 除以 255，正規化到 0~1
+        pixels = normalized - MNIST_MEAN  # 減去 MNIST 均值，與訓練前處理一致
+    tensor = pixels.reshape(1, 1, IMAGE_SIZE[1], IMAGE_SIZE[0])  # reshape：→ (1, 1, 28, 28)
     return tensor, original_size, mode
 
 
@@ -54,19 +56,19 @@ def load_image_as_tensor(path: str) -> tuple[np.ndarray, tuple[int, int], str]:
 
 def load_params(path: str) -> dict:
     """從 .npz 還原 CNN 的 params 字典（僅 W、b 與卷積 metadata）。"""
-    data = np.load(path)
+    data = np.load(path)  # load：讀取 .npz 壓縮檔，回傳類似字典的物件
     return {
         "conv1": {
             "W": data["conv1_W"],
             "b": data["conv1_b"],
-            "in_channels": CONV_IN_CHANNELS,
-            "out_channels": CONV_OUT_CHANNELS,
-            "kernel_size": CONV_KERNEL_SIZE,
-            "stride": CONV_STRIDE,
-            "padding": CONV_PADDING,
+            "in_channels": CONV_IN_CHANNELS,  # 卷積層 metadata：輸入通道數
+            "out_channels": CONV_OUT_CHANNELS,  # 輸出通道數（濾鏡個數）
+            "kernel_size": CONV_KERNEL_SIZE,  # 卷積核邊長
+            "stride": CONV_STRIDE,  # 步幅
+            "padding": CONV_PADDING,  # 補零圈數
         },
-        "fc1": {"W": data["fc1_W"], "b": data["fc1_b"]},
-        "fc2": {"W": data["fc2_W"], "b": data["fc2_b"]},
+        "fc1": {"W": data["fc1_W"], "b": data["fc1_b"]},  # fc1：展平→128 全連接層
+        "fc2": {"W": data["fc2_W"], "b": data["fc2_b"]},  # fc2：128→10 全連接層
     }
 
 
@@ -75,34 +77,35 @@ def load_params(path: str) -> dict:
 
 def _calc_output_size(size: int, kernel: int, stride: int) -> int:
     """依輸入邊長、卷積核大小、步幅，計算輸出邊長。"""
-    return (size - kernel) // stride + 1
+    return (size - kernel) // stride + 1  # 卷積／池化輸出邊長公式
 
 
 def im2col(
     x: np.ndarray, kernel_size: int, stride: int, padding: int
 ) -> tuple[np.ndarray, int, int]:
     """把輸入 x 轉成 im2col 矩陣，供卷積矩陣乘法使用。"""
-    batch, channel, height, width = x.shape
+    batch, channel, height, width = x.shape  # shape 解包：批次大小、通道數、高、寬
     if padding > 0:
-        x = np.pad(
+        x = np.pad(  # pad：在陣列四周補值
             x,
-            ((0, 0), (0, 0), (padding, padding), (padding, padding)),
-            mode="constant",
+            ((0, 0), (0, 0), (padding, padding), (padding, padding)),  # 只在高、寬方向補 padding 圈
+            mode="constant",  # constant：補的值為 0
         )
-        height += 2 * padding
-        width += 2 * padding
+        height += 2 * padding  # 補完後高度增加 2×padding
+        width += 2 * padding  # 補完後寬度增加 2×padding
 
-    out_h = _calc_output_size(height, kernel_size, stride)
-    out_w = _calc_output_size(width, kernel_size, stride)
+    out_h = _calc_output_size(height, kernel_size, stride)  # 卷積輸出高度
+    out_w = _calc_output_size(width, kernel_size, stride)  # 卷積輸出寬度
 
-    col = np.zeros((batch, channel, kernel_size, kernel_size, out_h, out_w), dtype=x.dtype)
-    for ky in range(kernel_size):
-        y_max = ky + stride * out_h
-        for kx in range(kernel_size):
-            x_max = kx + stride * out_w
-            col[:, :, ky, kx, :, :] = x[:, :, ky:y_max:stride, kx:x_max:stride]
+    col = np.zeros((batch, channel, kernel_size, kernel_size, out_h, out_w), dtype=x.dtype)  # zeros：預分配 im2col 工作陣列
+    for ky in range(kernel_size):  # ky：卷積核在垂直方向的偏移
+        y_max = ky + stride * out_h  # 切片終點（不含）
+        for kx in range(kernel_size):  # kx：卷積核在水平方向的偏移
+            x_max = kx + stride * out_w  # 切片終點（不含）
+            col[:, :, ky, kx, :, :] = x[:, :, ky:y_max:stride, kx:x_max:stride]  # 取出對應窗口並存入 col
 
-    col = col.transpose(0, 1, 2, 3, 4, 5).reshape(batch, channel * kernel_size * kernel_size, -1)
+    col = col.transpose(0, 1, 2, 3, 4, 5)  # transpose：重排維度，方便後續 reshape
+    col = col.reshape(batch, channel * kernel_size * kernel_size, -1)  # reshape：攤平窗口 → (batch, in*kh*kw, out_h*out_w)
     return col, out_h, out_w
 
 
@@ -111,14 +114,15 @@ def im2col(
 
 def relu(x: np.ndarray) -> np.ndarray:
     """ReLU 激活：max(0, x)。"""
-    return np.maximum(0, x)
+    return np.maximum(0, x)  # maximum：逐元素取較大值，向量化實作 ReLU
 
 
 def softmax(x: np.ndarray) -> np.ndarray:
     """對每個樣本的 10 個類別分數做 softmax，回傳機率。"""
-    shifted = x - np.max(x, axis=1, keepdims=True)
-    exp_x = np.exp(shifted)
-    return exp_x / np.sum(exp_x, axis=1, keepdims=True)
+    shifted = x - np.max(x, axis=1, keepdims=True)  # max：axis=1 每列取最大；keepdims 保留維度方便相減
+    exp_x = np.exp(shifted)  # exp：對每個分數取 e 的次方
+    sum_exp = np.sum(exp_x, axis=1, keepdims=True)  # sum：axis=1 每列加總，keepdims 保留維度方便相除
+    return exp_x / sum_exp  # 逐元素相除，每列機率加總為 1
 
 
 # === 卷積、池化、全連接 ===
@@ -126,46 +130,49 @@ def softmax(x: np.ndarray) -> np.ndarray:
 
 def conv_forward(x: np.ndarray, params: dict) -> np.ndarray:
     """卷積前向傳播，輸入 (batch, in_ch, H, W)。"""
-    W = params["W"]
-    b = params["b"]
-    kernel_size = params["kernel_size"]
-    stride = params["stride"]
-    padding = params["padding"]
-    out_channels = params["out_channels"]
-    batch = x.shape[0]
+    W = params["W"]  # 卷積濾鏡權重
+    b = params["b"]  # 卷積偏置
+    kernel_size = params["kernel_size"]  # 卷積核邊長
+    stride = params["stride"]  # 步幅
+    padding = params["padding"]  # 補零圈數
+    out_channels = params["out_channels"]  # 輸出通道數
+    batch = x.shape[0]  # shape[0]：這批有幾張圖
 
     col, out_h, out_w = im2col(x, kernel_size, stride, padding)
-    W_col = W.reshape(out_channels, -1)
+    W_col = W.reshape(out_channels, -1)  # reshape：濾鏡攤平成 (out_ch, in*kh*kw)
 
-    out = np.zeros((batch, out_channels, col.shape[2]), dtype=np.float64)
+    out = np.zeros((batch, out_channels, col.shape[2]), dtype=np.float64)  # zeros：預分配輸出矩陣
     for i in range(batch):
-        out[i] = W_col @ col[i] + b.reshape(-1, 1)
+        matmul_out = W_col @ col[i]  # @：矩陣乘法 (out_ch, in*kh*kw) × (in*kh*kw, out_h*out_w)
+        out[i] = matmul_out + b.reshape(-1, 1)  # 加上偏置，shape (out_ch, out_h*out_w)
 
-    return out.reshape(batch, out_channels, out_h, out_w)
+    return out.reshape(batch, out_channels, out_h, out_w)  # reshape：還原為 4D 特徵圖
 
 
 def maxpool_forward(
     x: np.ndarray, pool_size: int = 2, stride: int = 2
 ) -> np.ndarray:
     """最大池化前向傳播。"""
-    batch, channel, height, width = x.shape
-    out_h = _calc_output_size(height, pool_size, stride)
-    out_w = _calc_output_size(width, pool_size, stride)
+    batch, channel, height, width = x.shape  # shape 解包：批次、通道、高、寬
+    out_h = _calc_output_size(height, pool_size, stride)  # 池化輸出高度
+    out_w = _calc_output_size(width, pool_size, stride)  # 池化輸出寬度
 
-    out = np.zeros((batch, channel, out_h, out_w), dtype=np.float64)
+    out = np.zeros((batch, channel, out_h, out_w), dtype=np.float64)  # zeros：預分配池化輸出
     for i in range(out_h):
         for j in range(out_w):
-            y0 = i * stride
-            x0 = j * stride
-            window = x[:, :, y0 : y0 + pool_size, x0 : x0 + pool_size]
-            out[:, :, i, j] = np.max(window, axis=(2, 3))
+            y0 = i * stride  # 窗口左上角 y 座標
+            x0 = j * stride  # 窗口左上角 x 座標
+            window = x[:, :, y0 : y0 + pool_size, x0 : x0 + pool_size]  # 取出 pool_size×pool_size 窗口
+            window_max = np.max(window, axis=(2, 3))  # max：沿高寬維取窗口最大值
+            out[:, :, i, j] = window_max  # 寫入池化輸出
 
     return out
 
 
 def dense_forward(x: np.ndarray, params: dict) -> np.ndarray:
     """全連接前向傳播：y = x @ W + b"""
-    return x @ params["W"] + params["b"]
+    out = x @ params["W"]  # @：矩陣乘法 (batch, in) × (in, out)
+    return out + params["b"]  # 加上偏置 b，shape (out,)
 
 
 # === CNN 前向推理（含進度輸出）===
@@ -176,22 +183,22 @@ def model_forward_verbose(x: np.ndarray, params: dict) -> np.ndarray:
     CNN 前向傳播並印出各層 shape。
     架構：Conv → ReLU → MaxPool → 展平 → FC → ReLU → FC → Softmax
     """
-    c1 = conv_forward(x, params["conv1"])
-    r1 = relu(c1)
+    c1 = conv_forward(x, params["conv1"])  # conv1：1→16 通道卷積
+    r1 = relu(c1)  # ReLU：負值歸零
     print(f"      Conv1+ReLU  → shape {r1.shape}")
 
-    p1 = maxpool_forward(r1)
+    p1 = maxpool_forward(r1)  # MaxPool：2×2 池化，特徵圖縮半
     print(f"      MaxPool     → shape {p1.shape}")
 
-    flat = p1.reshape(p1.shape[0], -1)
-    f1 = dense_forward(flat, params["fc1"])
-    r3 = relu(f1)
+    flat = p1.reshape(p1.shape[0], -1)  # reshape：-1 表示其餘維度自動計算 → (batch, flat_size)
+    f1 = dense_forward(flat, params["fc1"])  # fc1：展平→128 全連接
+    r3 = relu(f1)  # ReLU：負值歸零
     print(f"      FC128+ReLU  → shape {r3.shape}")
 
-    logits = dense_forward(r3, params["fc2"])
+    logits = dense_forward(r3, params["fc2"])  # fc2：128→10，輸出 10 個類別分數
     print(f"      FC10 logits → shape {logits.shape}")
 
-    probs = softmax(logits)
+    probs = softmax(logits)  # Softmax：10 個分數轉成機率（加總為 1）
     print("      Softmax     → done")
     return probs
 
@@ -201,12 +208,12 @@ def model_forward_verbose(x: np.ndarray, params: dict) -> np.ndarray:
 
 def print_probs(probs: np.ndarray) -> tuple[int, float]:
     """印出 0～9 各類機率（百分比），回傳預測數字與置信度。"""
-    row = probs[0]
+    row = probs[0]  # 取第一筆樣本（batch=1）的 10 類機率
     for digit in range(NUM_CLASSES):
         print(f"      Digit {digit}: {row[digit] * 100:6.2f}%")
 
-    pred = int(np.argmax(row))
-    confidence = float(row[pred])
+    pred = int(np.argmax(row))  # argmax：10 個機率中取最大值 index → 預測數字
+    confidence = float(row[pred])  # 取出預測類別的機率值
     print(f"      Predicted digit: {pred}")
     print(f"      Confidence:      {confidence * 100:.2f}%")
     return pred, confidence

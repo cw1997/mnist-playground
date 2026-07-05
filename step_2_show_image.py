@@ -34,22 +34,26 @@ SPLITS = [
 
 def read_images(path: str) -> tuple[bytes, int, int, int]:
     """讀取 IDX3 圖像檔，回傳像素位元組、張數、列數、行數。"""
-    with open(path, "rb") as f:
+    with open(path, "rb") as f:  # "rb"：以二進位唯讀模式開檔
         # 大端序：magic(2051)、張數、列數、行數
-        magic, count, rows, cols = struct.unpack(">IIII", f.read(16))
+        header = f.read(16)  # read(16)：讀取前 16 bytes 的檔頭
+        magic, count, rows, cols = struct.unpack(">IIII", header)  # unpack：解讀 4 個大端序整數
         if magic != 2051:
             raise ValueError(f"unexpected magic number in {path}: {magic}")
-        return f.read(count * rows * cols), count, rows, cols
+        pixel_bytes = f.read(count * rows * cols)  # read：讀取全部像素的 bytes（每張 rows×cols）
+        return pixel_bytes, count, rows, cols
 
 
 def read_labels(path: str) -> tuple[bytes, int]:
     """讀取 IDX1 標籤檔，回傳標籤位元組與筆數。"""
-    with open(path, "rb") as f:
+    with open(path, "rb") as f:  # "rb"：以二進位唯讀模式開檔
         # 大端序：magic(2049)、筆數
-        magic, count = struct.unpack(">II", f.read(8))
+        header = f.read(8)  # read(8)：讀取前 8 bytes 的檔頭
+        magic, count = struct.unpack(">II", header)  # unpack：解讀 magic 與標籤筆數
         if magic != 2049:
             raise ValueError(f"unexpected magic number in {path}: {magic}")
-        return f.read(count), count
+        label_bytes = f.read(count)  # read：讀取 count 個標籤（每筆 1 byte，值 0~9）
+        return label_bytes, count
 
 
 def export_split(split: str, images_file: str, labels_file: str, step: int) -> None:
@@ -67,15 +71,18 @@ def export_split(split: str, images_file: str, labels_file: str, step: int) -> N
     print(f"      Labels: {label_count} labels matched")
     print(f"      Output → {OUTPUT_DIR}/{split}/{{0-9}}/")
 
-    pixel_size = rows * cols
-    for i in range(count):
-        label = labels[i]
+    pixel_size = rows * cols  # 每張圖 28×28 = 784 個像素
+    for i in range(count):  # range(count)：依序處理第 0 到 count-1 張圖
+        label = labels[i]  # labels[i]：第 i 張圖的數字標籤（0~9）
         # 依分割與數字標籤建立子目錄，例如 images/train/3/
         out_dir = f"{OUTPUT_DIR}/{split}/{label}"
-        os.makedirs(out_dir, exist_ok=True)
-        img_bytes = pixels[i * pixel_size : (i + 1) * pixel_size]
-        # "L" 表示 8 位元灰階；檔名使用原始索引，與 MNIST 順序一致
-        Image.frombytes("L", (cols, rows), img_bytes).save(f"{out_dir}/{i:05d}.png")
+        os.makedirs(out_dir, exist_ok=True)  # makedirs：建立輸出子目錄（已存在不報錯）
+        start = i * pixel_size  # 這張圖在 pixels 中的起始位置
+        end = (i + 1) * pixel_size  # 這張圖的結束位置（不含）
+        img_bytes = pixels[start:end]  # 切片：取出第 i 張圖的 784 bytes
+        # "L" 表示 8 位元灰階；從 bytes 建立 PIL 圖片物件
+        img = Image.frombytes("L", (cols, rows), img_bytes)  # frombytes：bytes → 28×28 灰階圖
+        img.save(f"{out_dir}/{i:05d}.png")  # save：寫入 PNG，檔名使用原始索引
 
     print(f"      Export complete: {count} images")
 
@@ -85,7 +92,7 @@ def run_export() -> None:
     print("=== MNIST PNG Export ===")
 
     print("[1/3] Checking MNIST files ...")
-    missing = [f for f in REQUIRED_FILES if not os.path.isfile(f"{MNIST_DIR}/{f}")]
+    missing = [f for f in REQUIRED_FILES if not os.path.isfile(f"{MNIST_DIR}/{f}")]  # 列表推導：找出缺少的 IDX 檔
     if missing:
         print("Missing MNIST files:", ", ".join(missing))
         print("Run step_1_download_mnist.py first.")

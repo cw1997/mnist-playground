@@ -113,8 +113,10 @@ def relu(x: np.ndarray) -> np.ndarray:
 
 def relu_backward(x: np.ndarray, dout: np.ndarray) -> np.ndarray:
     """ReLU 反向傳播：x<=0 的位置梯度為 0，其餘原樣傳回。"""
-    return dout * (x > 0)
-
+    if x <= 0:
+        return 0
+    else:
+        return dout
 
 def softmax(x: np.ndarray) -> np.ndarray:
     """
@@ -123,7 +125,8 @@ def softmax(x: np.ndarray) -> np.ndarray:
     """
     shifted = x - np.max(x, axis=1, keepdims=True)  # max：axis=1 每列取最大；keepdims 保留維度方便相減
     exp_x = np.exp(shifted)  # exp：對每個分數取 e 的次方
-    return exp_x / np.sum(exp_x, axis=1, keepdims=True)  # sum：axis=1 每列加總，除後得機率（加總為 1）
+    sum_exp = np.sum(exp_x, axis=1, keepdims=True)  # sum：axis=1 每列加總，keepdims 保留維度方便相除
+    return exp_x / sum_exp  # 逐元素相除，每列機率加總為 1
 
 
 def cross_entropy_loss(probs: np.ndarray, y_true: np.ndarray) -> float:
@@ -132,8 +135,11 @@ def cross_entropy_loss(probs: np.ndarray, y_true: np.ndarray) -> float:
     row_idx = np.arange(batch)  # arange：產生 [0, 1, ..., batch-1]，作為每張圖的列索引
     true_labels = np.argmax(y_true, axis=1)  # argmax：axis=1 沿 10 類別找最大值位置 → 正確數字 0~9
     correct_probs = probs[row_idx, true_labels]  # 用列+欄索引，取出每張圖對正確數字的預測機率
-    # 交叉熵 = -平均 ln(機率)；1e-12 避免機率為 0 時 log(0) 出錯
-    return float(-np.sum(np.log(correct_probs + 1e-12)) / batch)  # log：逐元素取自然對數；sum：加總後取負平均得交叉熵
+    safe_probs = correct_probs + 1e-12  # 加微小值，避免機率為 0 時 log(0) 出錯
+    log_probs = np.log(safe_probs)  # log：逐元素取自然對數
+    sum_log_probs = np.sum(log_probs)  # sum：加總這批所有樣本的 log 機率
+    avg_log_prob = sum_log_probs / batch  # 除以 batch 取平均
+    return float(-avg_log_prob)  # 取負值得交叉熵（預測越準 loss 越小）
 
 
 def cross_entropy_gradient(probs: np.ndarray, y_true: np.ndarray) -> np.ndarray:
@@ -168,14 +174,17 @@ def init_dense_params(in_features: int, out_features: int) -> dict:
 
 def dense_forward(x: np.ndarray, params: dict) -> np.ndarray:
     """全連接前向傳播：y = x @ W + b"""
-    return x @ params["W"] + params["b"]  # @：矩陣乘法 (batch, in) × (in, out)；+ b 加上偏置
+    out = x @ params["W"]  # @：矩陣乘法 (batch, in) × (in, out)
+    return out + params["b"]  # 加上偏置 b，shape (out,)
 
 
 def dense_backward(dout: np.ndarray, params: dict, x: np.ndarray) -> np.ndarray:
     """全連接反向傳播：累積 dW、db，回傳 dx。"""
-    params["dW"] += x.T @ dout  # T：轉置 x；@：矩陣乘法 (in, batch) × (batch, out) → 權重梯度
+    dW = x.T @ dout  # T：轉置 x；@：矩陣乘法 (in, batch) × (batch, out) → 權重梯度
+    params["dW"] += dW  # 累加到 params，供 SGD 更新
     params["db"] += np.sum(dout, axis=0)  # sum：axis=0 沿 batch 維加總 → 形狀 (out,)
-    return dout @ params["W"].T  # @：dout 與 W.T 矩陣乘法；T：轉置 W，梯度往前層傳遞
+    dx = dout @ params["W"].T  # @：dout 與 W.T 矩陣乘法；T：轉置 W
+    return dx  # 梯度往前層傳遞
 
 
 # === MLP 前向／反向／更新（純函式）===

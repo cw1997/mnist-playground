@@ -26,26 +26,26 @@ FILES = [
 
 def decompress_gz(gz_path: str, out_path: str) -> None:
     """將 .gz 檔解壓縮為原始 IDX 二進位檔。"""
-    with gzip.open(gz_path, "rb") as f_in, open(out_path, "wb") as f_out:
-        shutil.copyfileobj(f_in, f_out)
+    with gzip.open(gz_path, "rb") as f_in, open(out_path, "wb") as f_out:  # gzip.open：讀 .gz；"wb"：以二進位寫入
+        shutil.copyfileobj(f_in, f_out)  # copyfileobj：把解壓後的 bytes 串流複製到輸出檔
 
 
 def run_download() -> None:
     """下載並解壓全部 MNIST 檔案，印出逐步進度。"""
     print("=== MNIST Download ===")
 
-    os.makedirs(MNIST_DIR, exist_ok=True)
-    total = len(FILES)
+    os.makedirs(MNIST_DIR, exist_ok=True)  # makedirs：建立 mnist/ 目錄；exist_ok=True 表示已存在也不報錯
+    total = len(FILES)  # len：清單長度，這裡是 4 個檔案
 
-    for idx, file in enumerate(FILES, start=1):
+    for idx, file in enumerate(FILES, start=1):  # enumerate：同時取得編號 idx（從 1 起）與檔名
         print(f"[{idx}/{total}] {file}")
-        gz_path = f"{MNIST_DIR}/{file}"
+        gz_path = f"{MNIST_DIR}/{file}"  # f-string：組合本機 .gz 路徑
 
         print("      Downloading ...")
-        urllib.request.urlretrieve(MNIST_URL + file, gz_path)
+        urllib.request.urlretrieve(MNIST_URL + file, gz_path)  # urlretrieve：從網址下載並存到 gz_path
         print(f"      Saved to {gz_path}")
 
-        out_path = gz_path.removesuffix(".gz")
+        out_path = gz_path.removesuffix(".gz")  # removesuffix：去掉 .gz 副檔名，得到 IDX 原始檔名
         print("      Decompressing ...")
         decompress_gz(gz_path, out_path)
         print(f"      Output → {out_path}")
