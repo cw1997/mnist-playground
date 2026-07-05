@@ -403,57 +403,62 @@ if __name__ == "__main__":
                 params[layer]["dW"].fill(0)  # fill：梯度清零，準備本批累加
                 params[layer]["db"].fill(0)
 
-            probs, cache = forward(X_batch, params)
-            loss = cross_entropy_loss(probs, y_batch)
-            backward(probs, y_batch, params, cache)
-
+            probs, cache = forward(X_batch, params) # 前向傳播
+            loss = cross_entropy_loss(probs, y_batch) # 交叉熵損失
+            backward(probs, y_batch, params, cache) # 反向傳播
+            
+            # 更新權重和偏置
             for layer in ("fc1", "fc2"):
                 p = params[layer]
                 p["W"] -= LEARNING_RATE * p["dW"]  # SGD：沿梯度反方向更新權重
-                p["b"] -= LEARNING_RATE * p["db"]
+                p["b"] -= LEARNING_RATE * p["db"] # SGD：沿梯度反方向更新偏置
 
-            total_loss += loss
-            total_batches += 1
+            total_loss += loss # 累加損失
+            total_batches += 1 # 累加批次數
+            # 計算本批猜對幾張
             preds = predict(X_batch, params)  # 模型預測的 0~9
             true_labels = np.argmax(y_batch, axis=1)  # argmax：axis=1 從 one-hot 取正確數字 0~9
+            # 計算本批猜對幾張
             correct += np.sum(preds == true_labels)  # sum：布林 True 當 1 加總 → 本批猜對幾張
+            # 累加本批猜對幾張
 
             # 每 100 批或最後一批印出進度
             if batch_idx % 100 == 0 or batch_idx == num_batches:
-                avg_loss = total_loss / total_batches
-                samples_seen = min(batch_idx * BATCH_SIZE, train_total)
-                train_acc = correct / samples_seen
+                avg_loss = total_loss / total_batches # 計算平均損失
+                samples_seen = min(batch_idx * BATCH_SIZE, train_total) # 計算已看過的樣本數
+                train_acc = correct / samples_seen # 計算訓練準確率
                 print(
                     f"      epoch {epoch}/{EPOCHS}  batch {batch_idx}/{num_batches}  "
-                    f"loss={loss:.4f}  avg_loss={avg_loss:.4f}  "
-                    f"train_acc={train_acc * 100:.1f}%"
+                    f"loss={loss:.4f}  avg_loss={avg_loss:.4f}  " # 計算平均損失
+                    f"train_acc={train_acc * 100:.1f}%" # 計算訓練準確率
                 )
 
         avg_loss = total_loss / total_batches
-        train_acc = correct / train_total
+        train_acc = correct / train_total # 計算訓練準確率
         print(
             f"      epoch {epoch}/{EPOCHS} done  "
-            f"loss={avg_loss:.4f}  train_acc={train_acc * 100:.1f}%"
+            f"loss={avg_loss:.4f}  train_acc={train_acc * 100:.1f}%" # 計算訓練準確率
         )
 
     print("[4/5] Evaluating on test set ...")
     test_correct = 0
     test_total = X_test.shape[0]
-    eval_batch_size = 256
-    test_num_batches = (test_total + eval_batch_size - 1) // eval_batch_size
+    eval_batch_size = 256 # 評估批次大小
+    test_num_batches = (test_total + eval_batch_size - 1) // eval_batch_size # 計算評估批次數
 
     for batch_idx in range(test_num_batches):
-        start = batch_idx * eval_batch_size
-        end = min(start + eval_batch_size, test_total)
-        X_batch = X_test[start:end]
-        y_batch = y_test[start:end]
+        start = batch_idx * eval_batch_size # 計算起始索引
+        end = min(start + eval_batch_size, test_total) # 計算結束索引
+        X_batch = X_test[start:end] # 取出這批的輸入
+        y_batch = y_test[start:end] # 取出這批的輸入和標籤
 
-        preds = predict(X_batch, params)
+        preds = predict(X_batch, params) # 模型預測的 0~9
         true_labels = np.argmax(y_batch, axis=1)  # argmax：axis=1 從 one-hot 取正確數字 0~9
         test_correct += np.sum(preds == true_labels)  # sum：布林 True 當 1 加總 → 本批猜對幾張
+        # 每 100 批或最後一批印出進度
         print(
             f"      eval batch {batch_idx + 1}/{test_num_batches}  "
-            f"running_acc={test_correct / test_total * 100:.1f}%"
+            f"running_acc={test_correct / test_total * 100:.1f}%" # 計算評估準確率
         )
 
     print(f"      test accuracy: {test_correct / test_total * 100:.1f}%")
