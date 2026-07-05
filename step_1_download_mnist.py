@@ -26,9 +26,9 @@ for file in files:
     gz_path = f"mnist/{file}"
     # 下載壓縮檔
     urllib.request.urlretrieve(url + file, gz_path)
-    print("download complete: ", file)
+    print(f"Download complete: {file}")
 
     # 解壓縮，去掉 .gz 副檔名即為輸出路徑
     out_path = gz_path.removesuffix(".gz")
     decompress_gz(gz_path, out_path)
-    print("decompress complete: ", out_path)
+    print(f"Decompression complete: {out_path}")

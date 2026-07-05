@@ -63,14 +63,14 @@ def export_split(split: str, images_file: str, labels_file: str) -> None:
         # "L" 表示 8 位元灰階；檔名使用原始索引，與 MNIST 順序一致
         Image.frombytes("L", (cols, rows), img_bytes).save(f"{out_dir}/{i:05d}.png")
 
-    print("export complete: ", split, f"({count} images)")
+    print(f"Export complete: {split} ({count} images)")
 
 
 # 確認 step 1 已下載所需檔案
 missing = [f for f in REQUIRED_FILES if not os.path.isfile(f"{MNIST_DIR}/{f}")]
 if missing:
-    print("missing MNIST files:", ", ".join(missing))
-    print("run step_1_download_mnist.py first")
+    print("Missing MNIST files:", ", ".join(missing))
+    print("Run step_1_download_mnist.py first.")
     sys.exit(1)
 
 for split, images_file, labels_file in SPLITS:
