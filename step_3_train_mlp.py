@@ -59,7 +59,7 @@ def read_images(path: str) -> tuple[np.ndarray, int, int, int]:
         if magic != 2051:
             raise ValueError(f"unexpected magic number in {path}: {magic}")
         # 每個像素是 0～255 的整數，先讀成 uint8 再轉 float
-        pixels = np.frombuffer(f.read(count * rows * cols), dtype=np.uint8)
+        pixels = np.frombuffer(f.read(count * rows * cols), dtype=np.uint8)  # frombuffer：將二進位 bytes 直接解讀為一維陣列
     return pixels, count, rows, cols
 
 
@@ -69,7 +69,7 @@ def read_labels(path: str) -> tuple[np.ndarray, int]:
         magic, count = struct.unpack(">II", f.read(8))
         if magic != 2049:
             raise ValueError(f"unexpected magic number in {path}: {magic}")
-        labels = np.frombuffer(f.read(count), dtype=np.uint8)
+        labels = np.frombuffer(f.read(count), dtype=np.uint8)  # frombuffer：將二進位 bytes 直接解讀為一維標籤陣列
     return labels, count
 
 
@@ -93,8 +93,8 @@ def load_mnist_split(images_file: str, labels_file: str) -> tuple[np.ndarray, np
 
     # one-hot：把類別數字（例如 3）變成 [0,0,0,1,0,0,0,0,0,0]，請注意這裡的1在從0開始計算的第3個位置上
     # 交叉熵損失需要one-hot這種格式來比較「預測機率」與「正確答案」
-    y = np.zeros((count, NUM_CLASSES), dtype=np.float64)  # 形狀 (樣本數, 10)，全部填 0
-    row_idx = np.arange(count)  # [0, 1, ..., count-1]，每張圖對應的列號
+    y = np.zeros((count, NUM_CLASSES), dtype=np.float64)  # zeros：建立 (樣本數, 10) 的全 0 矩陣
+    row_idx = np.arange(count)  # arange：產生 [0, 1, ..., count-1]，作為每張圖的列索引
     y[row_idx, labels] = 1.0  # labels[i] 是第 i 張圖的數字；在該欄設 1
 
     return X, y
@@ -108,7 +108,7 @@ def load_mnist_split(images_file: str, labels_file: str) -> tuple[np.ndarray, np
 
 def relu(x: np.ndarray) -> np.ndarray:
     """ReLU 激活：max(0, x)。"""
-    return np.maximum(0, x)
+    return np.maximum(0, x)  # maximum：逐元素取較大值，向量化實作 ReLU
 
 
 def relu_backward(x: np.ndarray, dout: np.ndarray) -> np.ndarray:
@@ -121,19 +121,19 @@ def softmax(x: np.ndarray) -> np.ndarray:
     對每一列（每個樣本的 10 個類別分數）做 softmax。
     先減去最大值是為了避免 exp 溢位（數值穩定技巧）。
     """
-    shifted = x - np.max(x, axis=1, keepdims=True)  # axis=1：每列取最大；keepdims 保留維度方便相減
-    exp_x = np.exp(shifted)  # 對每個分數取 e 的次方
-    return exp_x / np.sum(exp_x, axis=1, keepdims=True)  # 每列除以該列總和，得到機率（加總為 1）
+    shifted = x - np.max(x, axis=1, keepdims=True)  # max：axis=1 每列取最大；keepdims 保留維度方便相減
+    exp_x = np.exp(shifted)  # exp：對每個分數取 e 的次方
+    return exp_x / np.sum(exp_x, axis=1, keepdims=True)  # sum：axis=1 每列加總，除後得機率（加總為 1）
 
 
 def cross_entropy_loss(probs: np.ndarray, y_true: np.ndarray) -> float:
     """交叉熵損失：預測越準，loss 越小。"""
     batch = y_true.shape[0]  # shape[0]：第一維大小，代表這批有幾張圖
-    row_idx = np.arange(batch)  # [0, 1, ..., batch-1]，每張圖在第幾列
-    true_labels = np.argmax(y_true, axis=1)  # axis=1 沿 10 類別找 1 的位置 → 正確數字 0~9
+    row_idx = np.arange(batch)  # arange：產生 [0, 1, ..., batch-1]，作為每張圖的列索引
+    true_labels = np.argmax(y_true, axis=1)  # argmax：axis=1 沿 10 類別找最大值位置 → 正確數字 0~9
     correct_probs = probs[row_idx, true_labels]  # 用列+欄索引，取出每張圖對正確數字的預測機率
     # 交叉熵 = -平均 ln(機率)；1e-12 避免機率為 0 時 log(0) 出錯
-    return float(-np.sum(np.log(correct_probs + 1e-12)) / batch)
+    return float(-np.sum(np.log(correct_probs + 1e-12)) / batch)  # log：逐元素取自然對數；sum：加總後取負平均得交叉熵
 
 
 def cross_entropy_gradient(probs: np.ndarray, y_true: np.ndarray) -> np.ndarray:
@@ -151,14 +151,14 @@ def cross_entropy_gradient(probs: np.ndarray, y_true: np.ndarray) -> np.ndarray:
 
 def init_dense_params(in_features: int, out_features: int) -> dict:
     """建立全連接層參數字典。Xavier 初始化讓前向與反向方差平衡。"""
-    scale = np.sqrt(2.0 / (in_features + out_features))  # Xavier 縮放因子，控制初始權重大小
-    W = np.random.randn(in_features, out_features) * scale  # randn：標準常態亂數，再乘以 scale
-    b = np.zeros(out_features, dtype=np.float64)  # 偏置初始為 0，長度等於輸出維度
+    scale = np.sqrt(2.0 / (in_features + out_features))  # sqrt：開平方根，得 Xavier 縮放因子
+    W = np.random.randn(in_features, out_features) * scale  # randn：產生標準常態亂數，再乘以 scale
+    b = np.zeros(out_features, dtype=np.float64)  # zeros：建立長度 out_features 的全 0 偏置向量
     return {
         "W": W,
         "b": b,
         "dW": np.zeros_like(W),  # zeros_like：建立與 W 同形狀的全 0 梯度矩陣
-        "db": np.zeros_like(b),
+        "db": np.zeros_like(b),  # zeros_like：建立與 b 同形狀的全 0 梯度向量
     }
 
 
@@ -168,14 +168,14 @@ def init_dense_params(in_features: int, out_features: int) -> dict:
 
 def dense_forward(x: np.ndarray, params: dict) -> np.ndarray:
     """全連接前向傳播：y = x @ W + b"""
-    return x @ params["W"] + params["b"]  # @ 矩陣乘法：(batch, in) × (in, out)；+ b 加上偏置
+    return x @ params["W"] + params["b"]  # @：矩陣乘法 (batch, in) × (in, out)；+ b 加上偏置
 
 
 def dense_backward(dout: np.ndarray, params: dict, x: np.ndarray) -> np.ndarray:
     """全連接反向傳播：累積 dW、db，回傳 dx。"""
-    params["dW"] += x.T @ dout  # .T 轉置 x；(in, batch) × (batch, out) → 權重梯度
-    params["db"] += np.sum(dout, axis=0)  # axis=0 沿 batch 維求和 → 形狀 (out,)
-    return dout @ params["W"].T  # 梯度繼續往前層傳遞
+    params["dW"] += x.T @ dout  # T：轉置 x；@：矩陣乘法 (in, batch) × (batch, out) → 權重梯度
+    params["db"] += np.sum(dout, axis=0)  # sum：axis=0 沿 batch 維加總 → 形狀 (out,)
+    return dout @ params["W"].T  # @：dout 與 W.T 矩陣乘法；T：轉置 W，梯度往前層傳遞
 
 
 # === MLP 前向／反向／更新（純函式）===
@@ -189,7 +189,7 @@ def model_forward(x: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
     """
     cache: dict = {}
 
-    flat = x.reshape(x.shape[0], -1)  # -1 表示「其餘維度自動算」→ (batch, 784)
+    flat = x.reshape(x.shape[0], -1)  # reshape：-1 表示其餘維度自動計算 → (batch, 784)
     cache["flat"] = flat
 
     f1 = dense_forward(flat, params["fc1"])
@@ -217,8 +217,8 @@ def model_backward(probs: np.ndarray, y_true: np.ndarray, params: dict, cache: d
 def zero_grads(params: dict) -> None:
     """把各層累積的梯度清零，準備下一個 batch。"""
     for layer in ("fc1", "fc2"):
-        params[layer]["dW"].fill(0)
-        params[layer]["db"].fill(0)
+        params[layer]["dW"].fill(0)  # fill：原地將陣列所有元素設為 0
+        params[layer]["db"].fill(0)  # fill：原地將陣列所有元素設為 0
 
 
 def update_params(params: dict, learning_rate: float) -> None:
@@ -232,12 +232,12 @@ def update_params(params: dict, learning_rate: float) -> None:
 def predict(x: np.ndarray, params: dict) -> np.ndarray:
     """回傳每筆樣本預測的數字類別（0～9）。"""
     probs, _ = model_forward(x, params)  # _ 表示忽略 cache
-    return np.argmax(probs, axis=1)  # 每列 10 個機率中取最大值的 index → 預測數字
+    return np.argmax(probs, axis=1)  # argmax：每列 10 個機率中取最大值 index → 預測數字
 
 
 def save_params(params: dict, path: str) -> None:
     """將各層 W、b 保存為 .npz，供 step 4 推理載入。"""
-    np.savez_compressed(
+    np.savez_compressed(  # savez_compressed：以壓縮格式將多個 ndarray 寫入單一 .npz
         path,
         fc1_W=params["fc1"]["W"],
         fc1_b=params["fc1"]["b"],
@@ -256,9 +256,9 @@ def iterate_minibatches(
     每個 epoch 通常會打亂順序，避免模型記住固定順序。
     """
     n = X.shape[0]
-    indices = np.arange(n)  # [0, 1, ..., n-1]，每筆樣本的索引
+    indices = np.arange(n)  # arange：產生 [0, 1, ..., n-1]，每筆樣本的索引
     if shuffle:
-        np.random.shuffle(indices)  # 原地打亂索引順序
+        np.random.shuffle(indices)  # shuffle：原地打亂索引順序
 
     for start in range(0, n, batch_size):
         end = min(start + batch_size, n)
@@ -275,7 +275,7 @@ if __name__ == "__main__":
         print("Run step_1_download_mnist.py first.")
         sys.exit(1)
 
-    np.random.seed(RANDOM_SEED)
+    np.random.seed(RANDOM_SEED)  # seed：固定亂數種子，使初始化與 shuffle 可重現
     print("=== MLP Training ===")
 
     print("[1/5] Loading MNIST data ...")
@@ -330,8 +330,8 @@ if __name__ == "__main__":
             total_loss += loss
             total_batches += 1
             preds = predict(X_batch, params)  # 模型預測的 0~9
-            true_labels = np.argmax(y_batch, axis=1)  # one-hot 轉回正確數字
-            correct += np.sum(preds == true_labels)  # True 當 1 加總 → 本批猜對幾張
+            true_labels = np.argmax(y_batch, axis=1)  # argmax：axis=1 從 one-hot 取正確數字 0~9
+            correct += np.sum(preds == true_labels)  # sum：布林 True 當 1 加總 → 本批猜對幾張
 
             # 每 100 批或最後一批印出進度
             if batch_idx % 100 == 0 or batch_idx == num_batches:
@@ -362,8 +362,8 @@ if __name__ == "__main__":
         start=1,
     ):
         preds = predict(X_batch, params)
-        true_labels = np.argmax(y_batch, axis=1)
-        test_correct += np.sum(preds == true_labels)
+        true_labels = np.argmax(y_batch, axis=1)  # argmax：axis=1 從 one-hot 取正確數字 0~9
+        test_correct += np.sum(preds == true_labels)  # sum：布林 True 當 1 加總 → 本批猜對幾張
         if batch_idx % 100 == 0 or batch_idx == test_num_batches:
             print(
                 f"      eval batch {batch_idx}/{test_num_batches}  "
