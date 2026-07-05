@@ -326,10 +326,10 @@ if __name__ == "__main__":
         correct = 0
         train_total = X_train.shape[0]
 
-        for batch_idx, (X_batch, y_batch) in enumerate(
-            iterate_minibatches(X_train, y_train, BATCH_SIZE, shuffle=True),
-            start=1,
-        ):
+        batch_idx = 0
+        minibatches = iterate_minibatches(X_train, y_train, BATCH_SIZE, shuffle=True)
+        for X_batch, y_batch in minibatches:
+            batch_idx += 1
             zero_grads(params)
             probs, cache = model_forward(X_batch, params)
             loss = cross_entropy_loss(probs, y_batch)
@@ -366,18 +366,19 @@ if __name__ == "__main__":
     eval_batch_size = 256
     test_num_batches = (test_total + eval_batch_size - 1) // eval_batch_size
 
-    for batch_idx, (X_batch, y_batch) in enumerate(
-        iterate_minibatches(X_test, y_test, eval_batch_size, shuffle=False),
-        start=1,
-    ):
+    for batch_idx in range(test_num_batches):
+        start = batch_idx * eval_batch_size
+        end = min(start + eval_batch_size, test_total)
+        X_batch = X_test[start:end]
+        y_batch = y_test[start:end]
+
         preds = predict(X_batch, params)
         true_labels = np.argmax(y_batch, axis=1)  # argmax：axis=1 從 one-hot 取正確數字 0~9
         test_correct += np.sum(preds == true_labels)  # sum：布林 True 當 1 加總 → 本批猜對幾張
-        if batch_idx % 100 == 0 or batch_idx == test_num_batches:
-            print(
-                f"      eval batch {batch_idx}/{test_num_batches}  "
-                f"running_acc={test_correct / test_total * 100:.1f}%"
-            )
+        print(
+            f"      eval batch {batch_idx + 1}/{test_num_batches}  "
+            f"running_acc={test_correct / test_total * 100:.1f}%"
+        )
 
     print(f"      test accuracy: {test_correct / test_total * 100:.1f}%")
 
