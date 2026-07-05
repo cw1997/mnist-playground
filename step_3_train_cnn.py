@@ -12,6 +12,7 @@
 import os
 import struct
 import sys
+from collections.abc import Iterator
 
 import numpy as np
 
@@ -63,7 +64,22 @@ WEIGHTS_PATH = f"{MODELS_DIR}/cnn.npz"
 
 
 def read_images(path: str) -> tuple[np.ndarray, int, int, int]:
-    """讀取 IDX3 圖像檔，回傳像素陣列、張數、列數、行數。"""
+    """讀取 MNIST IDX3 圖像檔，回傳像素陣列與維度資訊。
+
+    參數
+    ----
+    path : str
+        IDX3 格式圖像檔的本機路徑（magic number 須為 2051）。
+
+    回傳
+    ----
+    tuple[np.ndarray, int, int, int]
+        四元組，依序為：
+        - pixels：np.ndarray，形狀 ``(count * rows * cols,)``，dtype uint8
+        - count：int，圖像張數
+        - rows：int，每張圖列數（MNIST 為 28）
+        - cols：int，每張圖行數（MNIST 為 28）
+    """
     with open(path, "rb") as f:
         # 大端序：magic(2051)、張數、列數、行數
         magic, count, rows, cols = struct.unpack(">IIII", f.read(16))
@@ -75,7 +91,20 @@ def read_images(path: str) -> tuple[np.ndarray, int, int, int]:
 
 
 def read_labels(path: str) -> tuple[np.ndarray, int]:
-    """讀取 IDX1 標籤檔，回傳標籤陣列與筆數。"""
+    """讀取 MNIST IDX1 標籤檔，回傳標籤陣列與筆數。
+
+    參數
+    ----
+    path : str
+        IDX1 格式標籤檔的本機路徑（magic number 須為 2049）。
+
+    回傳
+    ----
+    tuple[np.ndarray, int]
+        二元組，依序為：
+        - labels：np.ndarray，形狀 ``(count,)``，dtype uint8，值 0～9
+        - count：int，標籤筆數
+    """
     with open(path, "rb") as f:
         magic, count = struct.unpack(">II", f.read(8))
         if magic != 2049:
@@ -85,10 +114,21 @@ def read_labels(path: str) -> tuple[np.ndarray, int]:
 
 
 def load_mnist_split(images_file: str, labels_file: str) -> tuple[np.ndarray, np.ndarray]:
-    """
-    載入單一分割（train 或 test），回傳：
-    - X: 形狀 (N, 1, 28, 28)，像素已正規化到 0～1 並減去 MNIST 均值
-    - y: 形狀 (N, 10) 的 one-hot 標籤
+    """載入單一分割（train 或 test），回傳零均值正規化特徵與 one-hot 標籤。
+
+    參數
+    ----
+    images_file : str
+        IDX3 圖像檔名（不含 ``mnist/`` 目錄前綴）。
+    labels_file : str
+        IDX1 標籤檔名（不含 ``mnist/`` 目錄前綴）。
+
+    回傳
+    ----
+    tuple[np.ndarray, np.ndarray]
+        二元組，依序為：
+        - X：np.ndarray，形狀 ``(N, 1, 28, 28)``，像素 ÷255 再減 ``MNIST_MEAN``，dtype float64
+        - y：np.ndarray，形狀 ``(N, 10)``，one-hot 編碼標籤，dtype float64
     """
     pixels, count, rows, cols = read_images(f"{MNIST_DIR}/{images_file}")
     labels, label_count = read_labels(f"{MNIST_DIR}/{labels_file}")
@@ -117,18 +157,50 @@ def load_mnist_split(images_file: str, labels_file: str) -> tuple[np.ndarray, np
 
 
 def _calc_output_size(size: int, kernel: int, stride: int) -> int:
-    """依輸入邊長、卷積核大小、步幅，計算輸出邊長。"""
+    """依輸入邊長、卷積核大小、步幅，計算卷積或池化輸出邊長。
+
+    公式：``(size - kernel) // stride + 1``。
+
+    參數
+    ----
+    size : int
+        輸入空間邊長（高度或寬度）。
+    kernel : int
+        卷積核或池化窗口邊長。
+    stride : int
+        步幅，每次滑動的格數。
+
+    回傳
+    ----
+    int
+        輸出空間邊長。
+    """
     return (size - kernel) // stride + 1  # 卷積／池化輸出邊長公式
 
 
 def im2col(
     x: np.ndarray, kernel_size: int, stride: int, padding: int
 ) -> tuple[np.ndarray, int, int]:
-    """
-    把輸入 x 轉成 im2col 矩陣。
+    """將 4D 輸入轉成 im2col 矩陣，供矩陣乘法加速卷積。
 
-    參數 x 形狀：(batch, channel, height, width)
-    回傳 col 形狀：(batch, channel*kernel*kernel, out_h*out_w)
+    參數
+    ----
+    x : np.ndarray
+        輸入特徵圖，形狀 ``(batch, channel, height, width)``。
+    kernel_size : int
+        卷積核邊長（例如 3）。
+    stride : int
+        卷積步幅（例如 1）。
+    padding : int
+        四周補零圈數（例如 1）。
+
+    回傳
+    ----
+    tuple[np.ndarray, int, int]
+        三元組，依序為：
+        - col：np.ndarray，形狀 ``(batch, channel*kernel*kernel, out_h*out_w)``
+        - out_h：int，卷積輸出高度
+        - out_w：int，卷積輸出寬度
     """
     batch, channel, height, width = x.shape  # shape 解包：批次大小、通道數、高、寬
     if padding > 0:
@@ -164,9 +236,27 @@ def col2im(
     stride: int,
     padding: int,
 ) -> np.ndarray:
-    """
-    im2col 的逆運算：把梯度從 col 格式還原回 (batch, channel, height, width)。
-    反向傳播時，同一像素可能對應多個窗口，梯度要加總回去。
+    """im2col 的逆運算：將 col 格式梯度還原為 4D 輸入梯度。
+
+    同一像素可能對應多個卷積窗口，梯度須加總回去。
+
+    參數
+    ----
+    col : np.ndarray
+        col 格式梯度，形狀 ``(batch, channel*kernel*kernel, out_h*out_w)``。
+    input_shape : tuple[int, int, int, int]
+        原始輸入 shape ``(batch, channel, height, width)``（不含 padding）。
+    kernel_size : int
+        卷積核邊長。
+    stride : int
+        卷積步幅。
+    padding : int
+        前向傳播時使用的補零圈數。
+
+    回傳
+    ----
+    np.ndarray
+        輸入梯度，形狀 ``(batch, channel, height, width)``。
     """
     batch, channel, height, width = input_shape  # shape 解包：原始輸入的 batch、通道、高、寬
     out_h = _calc_output_size(height + 2 * padding, kernel_size, stride)  # 含 padding 後的輸出高度
@@ -196,20 +286,54 @@ def col2im(
 
 
 def relu(x: np.ndarray) -> np.ndarray:
-    """ReLU 激活：max(0, x)。"""
+    """ReLU 激活函式：max(0, x)，逐元素將負值歸零。
+
+    參數
+    ----
+    x : np.ndarray
+        任意 shape 的輸入陣列，dtype float64。
+
+    回傳
+    ----
+    np.ndarray
+        與 ``x`` 同 shape，負值為 0、正值保留。
+    """
     return np.maximum(0, x)  # maximum：逐元素取較大值，向量化實作 ReLU
 
 
 def relu_backward(x: np.ndarray, dout: np.ndarray) -> np.ndarray:
-    """ReLU 反向傳播：x<=0 的位置梯度為 0，其餘原樣傳回。"""
+    """ReLU 反向傳播：前向輸入 x<=0 的位置梯度為 0，其餘原樣傳回。
+
+    參數
+    ----
+    x : np.ndarray
+        前向傳播時 ReLU 層的輸入（激活前），用於判斷遮罩。
+    dout : np.ndarray
+        來自後層的梯度，shape 須與 ``x`` 相同。
+
+    回傳
+    ----
+    np.ndarray
+        傳回前層的梯度，shape 與 ``dout`` 相同。
+    """
     mask = x > 0  # 布林遮罩：x>0 的位置為 True
     return dout * mask  # 負值位置梯度歸零，其餘原樣傳回
 
 
 def softmax(x: np.ndarray) -> np.ndarray:
-    """
-    對每一列（每個樣本的 10 個類別分數）做 softmax。
-    先減去最大值是為了避免 exp 溢位（數值穩定技巧）。
+    """對每個樣本的類別分數做 softmax，轉成機率分布。
+
+    先減去每列最大值以避免 exp 溢位（數值穩定技巧）。
+
+    參數
+    ----
+    x : np.ndarray
+        類別分數（logits），形狀 ``(batch, num_classes)``，dtype float64。
+
+    回傳
+    ----
+    np.ndarray
+        機率分布，形狀 ``(batch, num_classes)``，每列加總為 1。
     """
     shifted = x - np.max(x, axis=1, keepdims=True)  # max：axis=1 每列取最大；keepdims 保留維度方便相減
     exp_x = np.exp(shifted)  # exp：對每個分數取 e 的次方
@@ -218,7 +342,20 @@ def softmax(x: np.ndarray) -> np.ndarray:
 
 
 def cross_entropy_loss(probs: np.ndarray, y_true: np.ndarray) -> float:
-    """交叉熵損失：預測越準，loss 越小。"""
+    """計算 softmax 輸出與 one-hot 標籤的交叉熵損失（批次平均）。
+
+    參數
+    ----
+    probs : np.ndarray
+        softmax 機率，形狀 ``(batch, num_classes)``。
+    y_true : np.ndarray
+        one-hot 標籤，形狀 ``(batch, num_classes)``。
+
+    回傳
+    ----
+    float
+        標量 loss 值；預測越準，loss 越小。
+    """
     batch = y_true.shape[0]  # shape[0]：第一維大小，代表這批有幾張圖
     row_idx = np.arange(batch)  # arange：產生 [0, 1, ..., batch-1]，作為每張圖的列索引
     true_labels = np.argmax(y_true, axis=1)  # argmax：axis=1 沿 10 類別找最大值位置 → 正確數字 0~9
@@ -231,9 +368,19 @@ def cross_entropy_loss(probs: np.ndarray, y_true: np.ndarray) -> float:
 
 
 def cross_entropy_gradient(probs: np.ndarray, y_true: np.ndarray) -> np.ndarray:
-    """
-    softmax + 交叉熵合併後的梯度，形式非常簡潔：(預測機率 - 正確答案) / batch。
-    這是反向傳播的起點。
+    """softmax + 交叉熵合併後對 logits 的梯度，為反向傳播起點。
+
+    參數
+    ----
+    probs : np.ndarray
+        softmax 機率，形狀 ``(batch, num_classes)``。
+    y_true : np.ndarray
+        one-hot 標籤，形狀 ``(batch, num_classes)``。
+
+    回傳
+    ----
+    np.ndarray
+        梯度，形狀 ``(batch, num_classes)``，公式為 ``(probs - y_true) / batch``。
     """
     batch = y_true.shape[0]  # shape[0]：這批樣本數
     return (probs - y_true) / batch  # 預測機率減 one-hot 標籤，再除以 batch 取平均
@@ -250,7 +397,28 @@ def init_conv_params(
     kernel_size: int = 3,
     padding: int = 0,
 ) -> dict:
-    """建立卷積層參數字典。He 初始化適合 ReLU。"""
+    """建立卷積層參數字典，以 He 初始化權重（適合 ReLU）。
+
+    參數
+    ----
+    in_channels : int
+        輸入通道數（例如 1）。
+    out_channels : int
+        輸出通道數／濾鏡個數（例如 16）。
+    kernel_size : int, optional
+        卷積核邊長，預設 3。
+    padding : int, optional
+        四周補零圈數，預設 0。
+
+    回傳
+    ----
+    dict
+        卷積層參數字典，含：
+        - ``"W"``：np.ndarray，形狀 ``(out_channels, in_channels, kernel, kernel)``
+        - ``"b"``：np.ndarray，形狀 ``(out_channels,)``
+        - ``"dW"``、``"db"``：梯度陣列，初始全 0
+        - ``"in_channels"``、``"out_channels"``、``"kernel_size"``、``"stride"``、``"padding"``：int metadata
+    """
     fan_in = in_channels * kernel_size * kernel_size  # 每個濾鏡的輸入連線數
     scale = np.sqrt(2.0 / fan_in)  # sqrt：He 初始化縮放因子，適合 ReLU
     W = np.random.randn(out_channels, in_channels, kernel_size, kernel_size) * scale  # randn：標準常態亂數 × scale
@@ -269,7 +437,23 @@ def init_conv_params(
 
 
 def init_dense_params(in_features: int, out_features: int) -> dict:
-    """建立全連接層參數字典。Xavier 初始化讓前向與反向方差平衡。"""
+    """建立全連接層參數字典，以 Xavier 初始化權重。
+
+    參數
+    ----
+    in_features : int
+        輸入特徵維度（例如 3136 或 128）。
+    out_features : int
+        輸出特徵維度（例如 128 或 10）。
+
+    回傳
+    ----
+    dict
+        全連接層參數字典，含：
+        - ``"W"``：np.ndarray，形狀 ``(in_features, out_features)``
+        - ``"b"``：np.ndarray，形狀 ``(out_features,)``
+        - ``"dW"``、``"db"``：梯度陣列，初始全 0
+    """
     scale = np.sqrt(2.0 / (in_features + out_features))  # sqrt：開平方根，得 Xavier 縮放因子
     W = np.random.randn(in_features, out_features) * scale  # randn：產生標準常態亂數，再乘以 scale
     b = np.zeros(out_features, dtype=np.float64)  # zeros：建立長度 out_features 的全 0 偏置向量
@@ -286,10 +470,21 @@ def init_dense_params(in_features: int, out_features: int) -> dict:
 
 
 def conv_forward(x: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
-    """
-    卷積前向傳播。
-    輸入 x 形狀：(batch, in_channels, height, width)
-    回傳輸出與 cache（反向傳播時需要的中間結果）。
+    """卷積層前向傳播，以 im2col + 矩陣乘法實作。
+
+    參數
+    ----
+    x : np.ndarray
+        輸入特徵圖，形狀 ``(batch, in_channels, height, width)``。
+    params : dict
+        卷積層參數字典（``init_conv_params`` 格式），含 ``"W"``、``"b"`` 及 metadata。
+
+    回傳
+    ----
+    tuple[np.ndarray, dict]
+        二元組，依序為：
+        - out：np.ndarray，形狀 ``(batch, out_channels, out_h, out_w)``
+        - cache：dict，含 ``"x"``、``"col"``、``"out_h"``、``"out_w"``，供反向傳播使用
     """
     W = params["W"]
     b = params["b"]
@@ -318,8 +513,21 @@ def conv_forward(x: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
 
 
 def conv_backward(dout: np.ndarray, params: dict, cache: dict) -> np.ndarray:
-    """
-    卷積反向傳播：累積 dW、db 到 params，回傳對輸入的梯度 dx。
+    """卷積層反向傳播：累積 dW、db 至 params，回傳對輸入的梯度 dx。
+
+    參數
+    ----
+    dout : np.ndarray
+        來自後層的梯度，形狀 ``(batch, out_channels, out_h, out_w)``。
+    params : dict
+        卷積層參數字典；``"dW"`` 與 ``"db"`` 會原地累加梯度。
+    cache : dict
+        ``conv_forward`` 回傳的 cache，含 ``"x"``、``"col"`` 等。
+
+    回傳
+    ----
+    np.ndarray
+        輸入梯度 dx，形狀 ``(batch, in_channels, height, width)``。
     """
     W = params["W"]
     x = cache["x"]
@@ -348,9 +556,23 @@ def conv_backward(dout: np.ndarray, params: dict, cache: dict) -> np.ndarray:
 def maxpool_forward(
     x: np.ndarray, pool_size: int = 2, stride: int = 2
 ) -> tuple[np.ndarray, dict]:
-    """
-    最大池化前向傳播。
-    輸入 x 形狀：(batch, channel, height, width)
+    """最大池化前向傳播：每個窗口取最大值，縮小特徵圖。
+
+    參數
+    ----
+    x : np.ndarray
+        輸入特徵圖，形狀 ``(batch, channel, height, width)``。
+    pool_size : int, optional
+        池化窗口邊長，預設 2。
+    stride : int, optional
+        池化步幅，預設 2。
+
+    回傳
+    ----
+    tuple[np.ndarray, dict]
+        二元組，依序為：
+        - out：np.ndarray，形狀 ``(batch, channel, out_h, out_w)``
+        - cache：dict，含 ``"x"``、``"max_mask"``、``"pool_size"``、``"stride"``
     """
     batch, channel, height, width = x.shape
     out_h = _calc_output_size(height, pool_size, stride)
@@ -375,7 +597,20 @@ def maxpool_forward(
 
 
 def maxpool_backward(dout: np.ndarray, cache: dict) -> np.ndarray:
-    """最大池化反向傳播：梯度只回傳到前向時取到最大值的位置。"""
+    """最大池化反向傳播：梯度只回傳到前向取最大值的位置。
+
+    參數
+    ----
+    dout : np.ndarray
+        來自後層的梯度，形狀 ``(batch, channel, out_h, out_w)``。
+    cache : dict
+        ``maxpool_forward`` 回傳的 cache，含 ``"x"``、``"max_mask"`` 等。
+
+    回傳
+    ----
+    np.ndarray
+        輸入梯度，形狀與 cache 中 ``"x"`` 相同。
+    """
     x = cache["x"]
     max_mask = cache["max_mask"]
     pool_size = cache["pool_size"]
@@ -400,13 +635,41 @@ def maxpool_backward(dout: np.ndarray, cache: dict) -> np.ndarray:
 
 
 def dense_forward(x: np.ndarray, params: dict) -> np.ndarray:
-    """全連接前向傳播：y = x @ W + b"""
+    """全連接層前向傳播：y = x @ W + b。
+
+    參數
+    ----
+    x : np.ndarray
+        輸入特徵，形狀 ``(batch, in_features)``，dtype float64。
+    params : dict
+        全連接層參數字典，須含 ``"W"`` 與 ``"b"``（見 ``init_dense_params``）。
+
+    回傳
+    ----
+    np.ndarray
+        線性輸出，形狀 ``(batch, out_features)``。
+    """
     out = x @ params["W"]  # @：矩陣乘法 (batch, in) × (in, out)
     return out + params["b"]  # 加上偏置 b，shape (out,)
 
 
 def dense_backward(dout: np.ndarray, params: dict, x: np.ndarray) -> np.ndarray:
-    """全連接反向傳播：累積 dW、db，回傳 dx。"""
+    """全連接層反向傳播：累積 dW、db 至 params，回傳對輸入的梯度 dx。
+
+    參數
+    ----
+    dout : np.ndarray
+        來自後層的梯度，形狀 ``(batch, out_features)``。
+    params : dict
+        全連接層參數字典；``"dW"`` 與 ``"db"`` 會原地累加梯度。
+    x : np.ndarray
+        前向傳播時的輸入，形狀 ``(batch, in_features)``。
+
+    回傳
+    ----
+    np.ndarray
+        傳回前層的梯度 dx，形狀 ``(batch, in_features)``。
+    """
     dW = x.T @ dout  # T：轉置 x；@：矩陣乘法 (in, batch) × (batch, out) → 權重梯度
     params["dW"] += dW  # 累加到 params，供 SGD 更新
     params["db"] += np.sum(dout, axis=0)  # sum：axis=0 沿 batch 維加總 → 形狀 (out,)
@@ -419,9 +682,21 @@ def dense_backward(dout: np.ndarray, params: dict, x: np.ndarray) -> np.ndarray:
 
 
 def model_forward(x: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
-    """
-    整個 CNN 的前向傳播，回傳 softmax 機率與 cache。
-    架構：Conv → ReLU → MaxPool → 展平 → FC → ReLU → FC → Softmax
+    """整個 CNN 的前向傳播：Conv → ReLU → MaxPool → 展平 → FC → ReLU → FC → Softmax。
+
+    參數
+    ----
+    x : np.ndarray
+        輸入影像，形狀 ``(batch, 1, 28, 28)``，已零均值正規化。
+    params : dict
+        模型參數字典，須含 ``"conv1"``、``"fc1"``、``"fc2"``。
+
+    回傳
+    ----
+    tuple[np.ndarray, dict]
+        二元組，依序為：
+        - probs：np.ndarray，形狀 ``(batch, 10)``，各類別預測機率
+        - cache：dict，含各層中間結果（``"conv1"``、``"c1"``、``"r1"``、``"pool1"``、``"p1"``、``"flat"``、``"f1"``、``"r3"``、``"logits"``）
     """
     cache: dict = {}
 
@@ -453,7 +728,24 @@ def model_forward(x: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
 
 
 def model_backward(probs: np.ndarray, y_true: np.ndarray, params: dict, cache: dict) -> None:
-    """從 softmax+交叉熵的梯度開始，逐層反向傳播，梯度寫入 params 的 dW、db。"""
+    """從 softmax+交叉熵梯度開始，逐層反向傳播，梯度寫入 params 的 dW、db。
+
+    參數
+    ----
+    probs : np.ndarray
+        前向傳播的 softmax 機率，形狀 ``(batch, 10)``。
+    y_true : np.ndarray
+        one-hot 標籤，形狀 ``(batch, 10)``。
+    params : dict
+        模型參數字典（``"conv1"``、``"fc1"``、``"fc2"``）；各層 ``"dW"``、``"db"`` 原地累加。
+    cache : dict
+        ``model_forward`` 回傳的中間結果。
+
+    回傳
+    ----
+    None
+        無回傳值；梯度寫入 ``params`` 各層的 ``"dW"`` 與 ``"db"``。
+    """
     dout = cross_entropy_gradient(probs, y_true)
 
     dout = dense_backward(dout, params["fc2"], cache["r3"])
@@ -469,14 +761,38 @@ def model_backward(probs: np.ndarray, y_true: np.ndarray, params: dict, cache: d
 
 
 def zero_grads(params: dict) -> None:
-    """把各層累積的梯度清零，準備下一個 batch。"""
+    """將各層累積的梯度清零，準備下一個 mini-batch 更新。
+
+    參數
+    ----
+    params : dict
+        模型參數字典，含 ``"conv1"``、``"fc1"``、``"fc2"``；各層 ``"dW"``、``"db"`` 設為 0。
+
+    回傳
+    ----
+    None
+        無回傳值；原地修改 ``params`` 中的梯度陣列。
+    """
     for layer in params.values():
         layer["dW"].fill(0)  # fill：原地將 dW 所有元素設為 0
         layer["db"].fill(0)  # fill：原地將 db 所有元素設為 0
 
 
 def init_velocity(params: dict) -> dict:
-    """為 Momentum SGD 建立與各層 W、b 同形的速度字典。"""
+    """為 Momentum SGD 建立與各層 W、b 同形的速度字典。
+
+    參數
+    ----
+    params : dict
+        模型參數字典，含 ``"conv1"``、``"fc1"``、``"fc2"``。
+
+    回傳
+    ----
+    dict
+        速度字典，結構與 ``params`` 對應，每層含：
+        - ``"vW"``：np.ndarray，與該層 ``"W"`` 同形，初始全 0
+        - ``"vb"``：np.ndarray，與該層 ``"b"`` 同形，初始全 0
+    """
     return {
         name: {
             "vW": np.zeros_like(layer["W"]),  # zeros_like：與 W 同形狀的全 0 速度矩陣
@@ -489,7 +805,24 @@ def init_velocity(params: dict) -> dict:
 def update_params(
     params: dict, velocity: dict, learning_rate: float, momentum: float
 ) -> None:
-    """Momentum SGD：v = momentum*v - lr*grad；W += v。"""
+    """以 Momentum SGD 更新所有層權重：v = momentum*v - lr*grad；W += v。
+
+    參數
+    ----
+    params : dict
+        模型參數字典；各層須已有 ``"dW"``、``"db"``。
+    velocity : dict
+        ``init_velocity`` 回傳的速度字典，含各層 ``"vW"``、``"vb"``。
+    learning_rate : float
+        學習率（例如 0.01）。
+    momentum : float
+        動量係數（例如 0.9）。
+
+    回傳
+    ----
+    None
+        無回傳值；原地更新 ``params`` 的 ``"W"``、``"b"`` 與 ``velocity`` 的速度向量。
+    """
     for name, layer in params.items():
         v = velocity[name]
         v["vW"] = momentum * v["vW"] - learning_rate * layer["dW"]  # 更新 W 的速度向量
@@ -499,13 +832,39 @@ def update_params(
 
 
 def predict(x: np.ndarray, params: dict) -> np.ndarray:
-    """回傳每筆樣本預測的數字類別（0～9）。"""
+    """對輸入批次做前向推理，回傳每筆樣本預測的數字類別。
+
+    參數
+    ----
+    x : np.ndarray
+        輸入影像，形狀 ``(batch, 1, 28, 28)``。
+    params : dict
+        模型參數字典（``"conv1"``、``"fc1"``、``"fc2"``）。
+
+    回傳
+    ----
+    np.ndarray
+        預測類別，形狀 ``(batch,)``，dtype int64，值 0～9。
+    """
     probs, _ = model_forward(x, params)  # _ 表示忽略 cache
     return np.argmax(probs, axis=1)  # argmax：每列 10 個機率中取最大值 index → 預測數字
 
 
 def save_params(params: dict, path: str) -> None:
-    """將各層 W、b 保存為 .npz，供 step 4 推理載入。"""
+    """將各層 W、b 保存為壓縮 .npz 檔，供 step 4 推理載入。
+
+    參數
+    ----
+    params : dict
+        模型參數字典，含 ``"conv1"``、``"fc1"``、``"fc2"``；僅保存 ``"W"``、``"b"``。
+    path : str
+        輸出 .npz 檔路徑（例如 ``models/cnn.npz``）。
+
+    回傳
+    ----
+    None
+        無回傳值；權重寫入 ``path`` 指定的 .npz 檔。
+    """
     np.savez_compressed(  # savez_compressed：以壓縮格式將多個 ndarray 寫入單一 .npz
         path,
         conv1_W=params["conv1"]["W"],
@@ -522,10 +881,25 @@ def save_params(params: dict, path: str) -> None:
 
 def iterate_minibatches(
     X: np.ndarray, y: np.ndarray, batch_size: int, shuffle: bool = True
-):
-    """
-    把資料切成一個個小批次（mini-batch）。
-    每個 epoch 通常會打亂順序，避免模型記住固定順序。
+) -> Iterator[tuple[np.ndarray, np.ndarray]]:
+    """將資料集切成 mini-batch 生成器，可選擇每 epoch 打亂順序。
+
+    參數
+    ----
+    X : np.ndarray
+        特徵陣列，形狀 ``(N, 1, 28, 28)``。
+    y : np.ndarray
+        one-hot 標籤，形狀 ``(N, 10)``。
+    batch_size : int
+        每批樣本數（例如 64）。
+    shuffle : bool, optional
+        是否在每 epoch 開始前打亂索引，預設 ``True``。
+
+    回傳
+    ----
+    Iterator[tuple[np.ndarray, np.ndarray]]
+        生成器，每次 yield 一批 ``(X_batch, y_batch)``，
+        ``X_batch`` 形狀 ``(batch, 1, 28, 28)``，``y_batch`` 形狀 ``(batch, 10)``。
     """
     n = X.shape[0]  # shape[0]：資料集總樣本數
     indices = np.arange(n)  # arange：產生 [0, 1, ..., n-1]，每筆樣本的索引
@@ -542,7 +916,20 @@ def iterate_minibatches(
 
 
 def run_training() -> None:
-    """載入資料、訓練 CNN、評估並保存權重，印出逐步進度。"""
+    """載入 MNIST 資料、訓練 CNN、評估測試集並保存權重，印出五步進度。
+
+    主流程：``[1/5]`` 載入資料 → ``[2/5]`` 初始化 → ``[3/5]`` 訓練
+    → ``[4/5]`` 評估 → ``[5/5]`` 存檔至 ``models/cnn.npz``。
+
+    參數
+    ----
+    無。
+
+    回傳
+    ----
+    None
+        無回傳值；權重寫入 ``WEIGHTS_PATH``，進度以 ``print()`` 輸出至終端。
+    """
     print("=== CNN Training ===")
 
     print("[1/5] Loading MNIST data ...")

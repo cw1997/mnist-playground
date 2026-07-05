@@ -25,13 +25,39 @@ FILES = [
 
 
 def decompress_gz(gz_path: str, out_path: str) -> None:
-    """將 .gz 檔解壓縮為原始 IDX 二進位檔。"""
+    """將 .gz 壓縮檔解壓縮為原始 IDX 二進位檔。
+
+    參數
+    ----
+    gz_path : str
+        本機 .gz 壓縮檔路徑（例如 ``mnist/train-images-idx3-ubyte.gz``）。
+    out_path : str
+        解壓後 IDX 原始檔的輸出路徑（例如 ``mnist/train-images-idx3-ubyte``）。
+
+    回傳
+    ----
+    None
+        無回傳值；解壓結果直接寫入 ``out_path``。
+    """
     with gzip.open(gz_path, "rb") as f_in, open(out_path, "wb") as f_out:  # gzip.open：讀 .gz；"wb"：以二進位寫入
         shutil.copyfileobj(f_in, f_out)  # copyfileobj：把解壓後的 bytes 串流複製到輸出檔
 
 
 def run_download() -> None:
-    """下載並解壓全部 MNIST 檔案，印出逐步進度。"""
+    """從 Google CVDF 鏡像下載並解壓全部 MNIST 檔案，印出逐步進度。
+
+    依 ``FILES`` 常數依序下載四個 .gz 檔至 ``mnist/``，解壓後刪除 .gz 副檔名
+    得到 IDX 原始檔，供 step 2 與 step 3 讀取。
+
+    參數
+    ----
+    無。
+
+    回傳
+    ----
+    None
+        無回傳值；檔案寫入 ``mnist/`` 目錄，進度以 ``print()`` 輸出至終端。
+    """
     print("=== MNIST Download ===")
 
     os.makedirs(MNIST_DIR, exist_ok=True)  # makedirs：建立 mnist/ 目錄；exist_ok=True 表示已存在也不報錯
