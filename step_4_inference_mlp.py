@@ -1,10 +1,10 @@
 """
-步驟 4（淺層 MLP 推理）：載入 step 3 訓練的 MLP 權重，對輸入圖片做數字辨識。
+步驟 4（MLP 推理）：載入 step 3 訓練的 MLP 權重，對輸入圖片做數字辨識。
 
 架構：展平 784 → FC(128) → ReLU → FC(10) → Softmax。
 輸出逐層推理進度、10 個數字的機率，以及最高置信度預測。
 
-執行前請先跑 step_3_train_shallow.py 產生 models/mlp.npz。
+執行前請先跑 step_3_train_mlp.py 產生 models/mlp.npz。
 """
 
 import argparse
@@ -150,7 +150,7 @@ def run_inference(image_path: str, weights_path: str) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="以 MLP 對手寫數字圖片做推理（需先執行 step_3_train_shallow.py）"
+        description="以 MLP 對手寫數字圖片做推理（需先執行 step_3_train_mlp.py）"
     )
     parser.add_argument(
         "--image",
@@ -170,7 +170,7 @@ if __name__ == "__main__":
 
     if not os.path.isfile(args.weights):
         print(f"Weights not found: {args.weights}")
-        print("Run step_3_train_shallow.py first.")
+        print("Run step_3_train_mlp.py first.")
         sys.exit(1)
 
     run_inference(args.image, args.weights)

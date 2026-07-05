@@ -2,7 +2,7 @@
 步驟 3（CNN 版）：用純 NumPy 手寫卷積神經網路（CNN），訓練 MNIST 手寫數字辨識模型。
 
 架構：Conv(16, pad=1) → ReLU → MaxPool → FC(128) → ReLU → FC(10) → Softmax。
-若只想先學全連接網路，可改跑 step_3_train_shallow.py（784→128→10 的 MLP）。
+若只想先學全連接網路，可改跑 step_3_train_mlp.py（784→128→10 的 MLP）。
 
 本檔案包含從資料讀取、卷積／池化、前向傳播、反向傳播到訓練迴圈的全部邏輯。
 全程以純函式實作，不使用 class；權重與中間結果以字典傳遞。

@@ -36,14 +36,14 @@ python step_1_download_mnist.py
 python step_2_show_image.py
 
 # 步驟 3a：以純 NumPy 淺層 MLP 訓練（784→128→10，建議先跑）
-python step_3_train_shallow.py
+python step_3_train_mlp.py
 
 # 步驟 3b：以純 NumPy CNN 訓練（僅需 step 1 的 mnist/ 資料）
 python step_3_train_cnn.py
 
 # 步驟 4a：以 MLP 對圖片推理（預設 test.png，需先跑 step 3a）
-python step_4_inference_shallow.py
-python step_4_inference_shallow.py --image images/test/4/00027.png
+python step_4_inference_mlp.py
+python step_4_inference_mlp.py --image images/test/4/00027.png
 
 # 步驟 4b：以 CNN 對圖片推理（預設 test.png，需先跑 step 3b）
 python step_4_inference_cnn.py
@@ -65,9 +65,9 @@ conda deactivate
 | `models/` | 訓練權重 `.npz`（由 step 3 產生，已加入 `.gitignore`） |
 | `step_1_download_mnist.py` | 從官方鏡像下載並解壓資料集 |
 | `step_2_show_image.py` | 解析 IDX 格式並輸出 PNG |
-| `step_3_train_shallow.py` | 純 NumPy 淺層 MLP（784→128→10），訓練 MNIST 分類模型 |
+| `step_3_train_mlp.py` | 純 NumPy 淺層 MLP（784→128→10），訓練 MNIST 分類模型 |
 | `step_3_train_cnn.py` | 純 NumPy 手寫 CNN，訓練 MNIST 分類模型 |
-| `step_4_inference_shallow.py` | 載入 MLP 權重，對 PNG 圖片推理並輸出 10 類機率 |
+| `step_4_inference_mlp.py` | 載入 MLP 權重，對 PNG 圖片推理並輸出 10 類機率 |
 | `step_4_inference_cnn.py` | 載入 CNN 權重，對 PNG 圖片推理並輸出 10 類機率 |
 | `AGENTS.md` | AI 代理修改本專案時應遵循的規則 |
 
@@ -88,9 +88,9 @@ conda deactivate
 |------|------|
 | `step_1_download_mnist.py` | [step 1](#step_1_download_mnistpy) |
 | `step_2_show_image.py` | [step 2](#step_2_show_imagepy) |
-| `step_3_train_shallow.py` | [step 3a 淺層 MLP](#step_3_train_shallowpy) |
+| `step_3_train_mlp.py` | [step 3a 淺層 MLP](#step_3_train_mlppy) |
 | `step_3_train_cnn.py` | [step 3b CNN](#step_3_train_cnnpy) |
-| `step_4_inference_shallow.py` | [step 4a MLP 推理](#step_4_inference_shallowpy) |
+| `step_4_inference_mlp.py` | [step 4a MLP 推理](#step_4_inference_mlppy) |
 | `step_4_inference_cnn.py` | [step 4b CNN 推理](#step_4_inference_cnnpy) |
 
 ### step_1_download_mnist.py
@@ -352,7 +352,7 @@ train-labels-idx1-ubyte
 3. **一次讀入 payload**：`f.read(n)` 簡單高效；60000×784 ≈ 47MB，可接受。
 4. **回傳 `bytes` 而非逐張解析**：切片 `pixels[i*784:(i+1)*784]` 即可，延後交給 PIL 的 `Image.frombytes("L", (28, 28), ...)` 轉成 PNG。
 
-### step_3_train_shallow.py
+### step_3_train_mlp.py
 
 直接讀取 `mnist/` 下的 IDX 原始檔，以 **純 NumPy** 手寫全連接神經網路（MLP），訓練 MNIST 手寫數字辨識模型。不含卷積與池化，適合先理解反向傳播與 mini-batch 訓練，再進階到 [`step_3_train_cnn.py`](#step_3_train_cnnpy)。
 
@@ -770,22 +770,22 @@ flowchart TD
 4. **逐函式 forward／backward**：`conv_forward`、`dense_backward` 等各自獨立，清楚展示鏈式法則。
 5. **單檔自包含**：從資料讀取到訓練評估全在同一檔案，方便零基礎讀者對照 README 與原始碼學習。
 
-### step_4_inference_shallow.py
+### step_4_inference_mlp.py
 
 載入 step 3a 訓練的 MLP 權重（`models/mlp.npz`），對一張 PNG 圖片做手寫數字推理，印出逐層進度、10 類機率與最高置信度預測。
 
 **前置條件**
 
-- 已執行 `step_3_train_shallow.py`，產生 `models/mlp.npz`
+- 已執行 `step_3_train_mlp.py`，產生 `models/mlp.npz`
 - 已安裝 Pillow、NumPy
 - 待推理圖片存在（預設為專案根目錄的 `test.png`）
 
 **執行方式**
 
 ```bash
-python step_4_inference_shallow.py
-python step_4_inference_shallow.py --image images/test/4/00027.png
-python step_4_inference_shallow.py --image test.png --weights models/mlp.npz
+python step_4_inference_mlp.py
+python step_4_inference_mlp.py --image images/test/4/00027.png
+python step_4_inference_mlp.py --image test.png --weights models/mlp.npz
 ```
 
 **執行流程**
