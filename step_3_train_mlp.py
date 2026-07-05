@@ -162,26 +162,6 @@ def relu(x: np.ndarray) -> np.ndarray:
     return np.maximum(0, x)  # maximum：逐元素取較大值，向量化實作 ReLU
 
 
-def relu_backward(x: np.ndarray, dout: np.ndarray) -> np.ndarray:
-    """ReLU 反向傳播：前向輸入 x<=0 的位置梯度為 0，其餘原樣傳回。
-
-    參數
-    ----
-    x : np.ndarray
-        前向傳播時 ReLU 層的輸入（激活前），用於判斷哪些位置被截斷。
-    dout : np.ndarray
-        來自後層的梯度，shape 須與 ``x`` 相同。
-
-    回傳
-    ----
-    np.ndarray
-        傳回前層的梯度，shape 與 ``dout`` 相同。
-    """
-    if x <= 0:
-        return 0
-    else:
-        return dout
-
 def softmax(x: np.ndarray) -> np.ndarray:
     """對每個樣本的類別分數做 softmax，轉成機率分布。
 
@@ -229,25 +209,6 @@ def cross_entropy_loss(probs: np.ndarray, y_true: np.ndarray) -> float:
     return float(-avg_log_prob)  # 取負值得交叉熵（預測越準 loss 越小）
 
 
-def cross_entropy_gradient(probs: np.ndarray, y_true: np.ndarray) -> np.ndarray:
-    """softmax + 交叉熵合併後對 logits 的梯度，為反向傳播起點。
-
-    參數
-    ----
-    probs : np.ndarray
-        softmax 機率，形狀 ``(batch, num_classes)``。
-    y_true : np.ndarray
-        one-hot 標籤，形狀 ``(batch, num_classes)``。
-
-    回傳
-    ----
-    np.ndarray
-        梯度，形狀 ``(batch, num_classes)``，公式為 ``(probs - y_true) / batch``。
-    """
-    batch = y_true.shape[0]  # shape[0]：這批樣本數
-    return (probs - y_true) / batch  # 預測機率減 one-hot 標籤，再除以 batch 取平均
-
-
 # === 參數初始化 ===
 # 不用 class，改以字典存放每層權重 W、bias b，以及梯度 dW、db。
 
@@ -282,58 +243,11 @@ def init_dense_params(in_features: int, out_features: int) -> dict:
     }
 
 
-# === 全連接層（純函式）===
-# 全連接層把輸入向量做線性組合，得到新的特徵或最終類別分數。
-
-
-def dense_forward(x: np.ndarray, params: dict) -> np.ndarray:
-    """全連接層前向傳播：y = x @ W + b。
-
-    參數
-    ----
-    x : np.ndarray
-        輸入特徵，形狀 ``(batch, in_features)``，dtype float64。
-    params : dict
-        全連接層參數字典，須含 ``"W"`` 與 ``"b"``（見 ``init_dense_params``）。
-
-    回傳
-    ----
-    np.ndarray
-        線性輸出，形狀 ``(batch, out_features)``。
-    """
-    out = x @ params["W"]  # @：矩陣乘法 (batch, in) × (in, out)
-    return out + params["b"]  # 加上偏置 b，shape (out,)
-
-
-def dense_backward(dout: np.ndarray, params: dict, x: np.ndarray) -> np.ndarray:
-    """全連接層反向傳播：累積 dW、db 至 params，回傳對輸入的梯度 dx。
-
-    參數
-    ----
-    dout : np.ndarray
-        來自後層的梯度，形狀 ``(batch, out_features)``。
-    params : dict
-        全連接層參數字典；``"dW"`` 與 ``"db"`` 會原地累加梯度。
-    x : np.ndarray
-        前向傳播時的輸入，形狀 ``(batch, in_features)``。
-
-    回傳
-    ----
-    np.ndarray
-        傳回前層的梯度 dx，形狀 ``(batch, in_features)``。
-    """
-    dW = x.T @ dout  # T：轉置 x；@：矩陣乘法 (in, batch) × (batch, out) → 權重梯度
-    params["dW"] += dW  # 累加到 params，供 SGD 更新
-    params["db"] += np.sum(dout, axis=0)  # sum：axis=0 沿 batch 維加總 → 形狀 (out,)
-    dx = dout @ params["W"].T  # @：dout 與 W.T 矩陣乘法；T：轉置 W
-    return dx  # 梯度往前層傳遞
-
-
 # === MLP 前向／反向／更新（純函式）===
-# 把各層函式串起來，params 放權重，cache 放前向傳播的中間結果。
+# forward／backward 各一函式串起整網；params 放權重，cache 放前向中間結果。
 
 
-def model_forward(x: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
+def forward(x: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
     """整個 MLP 的前向傳播：展平 → FC(128) → ReLU → FC(10) → Softmax。
 
     參數
@@ -357,20 +271,20 @@ def model_forward(x: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
     flat = x.reshape(x.shape[0], -1)  # reshape：-1 表示其餘維度自動計算 → (batch, 784)
     cache["flat"] = flat
 
-    f1 = dense_forward(flat, params["fc1"])
+    f1 = flat @ params["fc1"]["W"] + params["fc1"]["b"]  # @：矩陣乘法 (batch, 784) × (784, 128)
     cache["f1"] = f1
 
     r1 = relu(f1)
     cache["r1"] = r1
 
-    logits = dense_forward(r1, params["fc2"])
+    logits = r1 @ params["fc2"]["W"] + params["fc2"]["b"]  # @：矩陣乘法 (batch, 128) × (128, 10)
     cache["logits"] = logits
 
     probs = softmax(logits)
     return probs, cache
 
 
-def model_backward(probs: np.ndarray, y_true: np.ndarray, params: dict, cache: dict) -> None:
+def backward(probs: np.ndarray, y_true: np.ndarray, params: dict, cache: dict) -> None:
     """從 softmax+交叉熵梯度開始，逐層反向傳播，梯度寫入 params 的 dW、db。
 
     參數
@@ -382,18 +296,27 @@ def model_backward(probs: np.ndarray, y_true: np.ndarray, params: dict, cache: d
     params : dict
         模型參數字典（``"fc1"``、``"fc2"``）；各層 ``"dW"``、``"db"`` 原地累加。
     cache : dict
-        ``model_forward`` 回傳的中間結果，含 ``"flat"``、``"f1"``、``"r1"``。
+        ``forward`` 回傳的中間結果，含 ``"flat"``、``"f1"``、``"r1"``。
 
     回傳
     ----
     None
         無回傳值；梯度寫入 ``params`` 各層的 ``"dW"`` 與 ``"db"``。
     """
-    dout = cross_entropy_gradient(probs, y_true)
+    batch = y_true.shape[0]  # shape[0]：這批樣本數
+    dout = (probs - y_true) / batch  # softmax+交叉熵合併梯度，反向傳播起點
 
-    dout = dense_backward(dout, params["fc2"], cache["r1"])
-    dout = relu_backward(cache["f1"], dout)
-    dense_backward(dout, params["fc1"], cache["flat"])
+    # fc2 反向：y = x @ W + b
+    params["fc2"]["dW"] += cache["r1"].T @ dout  # T：轉置；@：(128, batch) × (batch, 10)
+    params["fc2"]["db"] += np.sum(dout, axis=0)  # sum：沿 batch 維加總 → (10,)
+    dout = dout @ params["fc2"]["W"].T  # @：梯度傳回 fc2 輸入 → (batch, 128)
+
+    # ReLU 反向：前向輸入 <=0 的位置梯度歸零
+    dout = dout * (cache["f1"] > 0)  # 布林遮罩逐元素相乘，向量化實作
+
+    # fc1 反向
+    params["fc1"]["dW"] += cache["flat"].T @ dout  # T：轉置；@：(784, batch) × (batch, 128)
+    params["fc1"]["db"] += np.sum(dout, axis=0)  # sum：沿 batch 維加總 → (128,)
 
 
 def zero_grads(params: dict) -> None:
@@ -450,7 +373,7 @@ def predict(x: np.ndarray, params: dict) -> np.ndarray:
     np.ndarray
         預測類別，形狀 ``(batch,)``，dtype int64，值 0～9。
     """
-    probs, _ = model_forward(x, params)  # _ 表示忽略 cache
+    probs, _ = forward(x, params)  # _ 表示忽略 cache
     return np.argmax(probs, axis=1)  # argmax：每列 10 個機率中取最大值 index → 預測數字
 
 
@@ -569,9 +492,9 @@ if __name__ == "__main__":
         for X_batch, y_batch in minibatches:
             batch_idx += 1
             zero_grads(params)
-            probs, cache = model_forward(X_batch, params)
+            probs, cache = forward(X_batch, params)
             loss = cross_entropy_loss(probs, y_batch)
-            model_backward(probs, y_batch, params, cache)
+            backward(probs, y_batch, params, cache)
             update_params(params, LEARNING_RATE)
 
             total_loss += loss

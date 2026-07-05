@@ -381,7 +381,7 @@ flowchart LR
 1. 檢查 `mnist/` 下 4 個 IDX 檔是否存在
 2. 載入訓練集與測試集，像素正規化至 [0, 1]，標籤轉 one-hot
 3. 主程式內聯建立 `fc1`（784→128）與 `fc2`（128→10）權重字典
-4. 逐 epoch、逐 mini-batch 執行 `model_forward` → 交叉熵損失 → `model_backward` → `update_params`
+4. 逐 epoch、逐 mini-batch 執行 `forward` → 交叉熵損失 → `backward` → `update_params`
 5. 每 epoch 結束印摘要；主程式內聯分批評估測試集準確率
 
 **預期輸出範例**
@@ -419,24 +419,28 @@ flowchart LR
 
 #### 關鍵函式原理
 
-**`model_forward`／`model_backward`**
+**`forward`／`backward`**
 
 ```python
-def model_forward(x, params):
-    flat = x.reshape(x.shape[0], -1)           # (batch, 784)
-    f1 = dense_forward(flat, params["fc1"])  # (batch, 128)
+def forward(x, params):
+    flat = x.reshape(x.shape[0], -1)              # (batch, 784)
+    f1 = flat @ params["fc1"]["W"] + params["fc1"]["b"]  # (batch, 128)
     r1 = relu(f1)
-    logits = dense_forward(r1, params["fc2"]) # (batch, 10)
+    logits = r1 @ params["fc2"]["W"] + params["fc2"]["b"]  # (batch, 10)
     return softmax(logits), cache
 
-def model_backward(probs, y_true, params, cache):
-    dout = cross_entropy_gradient(probs, y_true)
-    dout = dense_backward(dout, params["fc2"], cache["r1"])
-    dout = relu_backward(cache["f1"], dout)
-    dense_backward(dout, params["fc1"], cache["flat"])
+def backward(probs, y_true, params, cache):
+    batch = y_true.shape[0]
+    dout = (probs - y_true) / batch
+    params["fc2"]["dW"] += cache["r1"].T @ dout
+    params["fc2"]["db"] += np.sum(dout, axis=0)
+    dout = dout @ params["fc2"]["W"].T
+    dout = dout * (cache["f1"] > 0)             # ReLU 反向遮罩
+    params["fc1"]["dW"] += cache["flat"].T @ dout
+    params["fc1"]["db"] += np.sum(dout, axis=0)
 ```
 
-反向傳播只有兩層全連接 + 一個 ReLU，是理解鏈式法則最簡單的起點。學會後再讀 CNN 版，只需額外理解卷積與池化的 forward／backward。
+整網前向／反向各一函式，激活（`relu`、`softmax`）與損失（`cross_entropy_loss`）仍獨立。反向傳播只有兩層全連接 + 一個 ReLU，是理解鏈式法則最簡單的起點。學會後再讀 CNN 版，只需額外理解卷積與池化的 forward／backward。
 
 **`cross_entropy_loss` 逐步拆解**
 
@@ -462,7 +466,8 @@ def cross_entropy_loss(probs, y_true):
 
 1. **先 MLP 後 CNN**：把 784 個像素直接當特徵，讓讀者專注於梯度下降與反向傳播，不被卷積細節分散注意力。
 2. **純函式 + 字典**：與 CNN 版相同風格，`params["fc1"]["W"]` 存放隱藏層權重。
-3. **單檔自包含**：資料讀取、激活函式、訓練迴圈全在同一檔案，方便對照 README 學習。
+3. **整網 forward／backward**：激活與損失仍獨立，但兩層全連接與 ReLU 的鏈式法則集中在單一函式，方便對照閱讀。
+4. **單檔自包含**：資料讀取、激活函式、訓練迴圈全在同一檔案，方便對照 README 學習。
 
 ### step_3_train_cnn.py
 
