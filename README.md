@@ -137,7 +137,30 @@ def decompress_gz(gz_path: str, out_path: str) -> None:
 | `open(out_path, "wb")` | 建立解壓後的輸出檔（同為二進位） |
 | `shutil.copyfileobj` | 把解壓後的位元組串流複製到輸出檔，不需一次載入整個檔案到記憶體 |
 
-主迴圈對 `files` 清單中 4 個檔案各執行一次：`urlretrieve` 下載 → `decompress_gz` 解壓 → 以 `removesuffix(".gz")` 決定輸出路徑。
+主迴圈對 `FILES` 清單中 4 個檔案各執行一次：`urlretrieve` 下載 → `decompress_gz` 解壓 → 以 `removesuffix(".gz")` 決定輸出路徑。
+
+**預期輸出範例**
+
+```
+=== MNIST Download ===
+[1/4] train-images-idx3-ubyte.gz
+      Downloading ...
+      Saved to mnist/train-images-idx3-ubyte.gz
+      Decompressing ...
+      Output → mnist/train-images-idx3-ubyte
+[2/4] train-labels-idx1-ubyte.gz
+      Downloading ...
+      Saved to mnist/train-labels-idx1-ubyte.gz
+      Decompressing ...
+      Output → mnist/train-labels-idx1-ubyte
+...
+[4/4] t10k-labels-idx1-ubyte.gz
+      Downloading ...
+      Saved to mnist/t10k-labels-idx1-ubyte.gz
+      Decompressing ...
+      Output → mnist/t10k-labels-idx1-ubyte
+      All 4 IDX files ready in mnist/
+```
 
 #### 設計要點
 
@@ -304,6 +327,24 @@ train-labels-idx1-ubyte
 
 `Image.frombytes("L", (cols, rows), img_bytes)` 會把 784 位元組的一維資料，依 `(cols, rows)` 即 `(28, 28)` 逐列填入，還原成灰階圖像後再存成 PNG。
 
+**預期輸出範例**
+
+```
+=== MNIST PNG Export ===
+[1/3] Checking MNIST files ...
+      All 4 IDX files found
+[2/3] Exporting train split ...
+      Images: 60000 samples, 28×28
+      Labels: 60000 labels matched
+      Output → images/train/{0-9}/
+      Export complete: 60000 images
+[3/3] Exporting test split ...
+      Images: 10000 samples, 28×28
+      Labels: 10000 labels matched
+      Output → images/test/{0-9}/
+      Export complete: 10000 images
+```
+
 #### 設計要點
 
 1. **`struct.unpack`**：把二進位檔頭按固定格式解析成 Python 整數，避免手動移位。
@@ -333,7 +374,7 @@ flowchart LR
 | FC hidden + ReLU | 128 | 唯一的全連接隱藏層 |
 | FC output + Softmax | 10 | 輸出 0～9 各類別機率 |
 
-**預設超參數**：3 epoch、batch size 64、學習率 0.01、SGD 優化器。全量 60000 筆訓練後，測試集準確率約 92～94%（略低於 CNN，因未提取局部空間特徵）。
+**預設超參數**：100 epoch、batch size 64、學習率 0.01、SGD 優化器。全量 60000 筆訓練後，測試集準確率約 92～94%（略低於 CNN，因未提取局部空間特徵）。
 
 **執行流程**
 
@@ -346,16 +387,24 @@ flowchart LR
 **預期輸出範例**
 
 ```
-Loading MNIST data...
-train: 60000 samples, test: 10000 samples
-Initializing model...
-  fc1 W: (784, 128)  fc2 W: (128, 10)
-training for 3 epochs (batch_size=64, 938 batches/epoch, lr=0.01)...
-epoch 1/3  batch 100/938  loss=0.6200  avg_loss=0.7800  train_acc=78.5%
-...
-Evaluating on test set...
-test accuracy: 93.1%
-Weights saved to models/mlp.npz
+=== MLP Training ===
+[1/5] Loading MNIST data ...
+      train: 60000 samples
+      test:  10000 samples
+      shape: (60000, 1, 28, 28), normalized [0, 1]
+[2/5] Initializing model ...
+      fc1 W: (784, 128)  fc2 W: (128, 10)
+[3/5] Training ...
+      100 epochs, batch_size=64, 938 batches/epoch, lr=0.01
+      epoch 1/100  batch 100/938  loss=0.6200  avg_loss=0.7800  train_acc=78.5%
+      ...
+      epoch 1/100 done  loss=0.4500  train_acc=87.5%
+      ...
+[4/5] Evaluating on test set ...
+      eval batch 40/40  running_acc=93.1%
+      test accuracy: 93.1%
+[5/5] Saving weights ...
+      Saved to models/mlp.npz
 ```
 
 #### 與 CNN 版的對照
@@ -435,21 +484,27 @@ flowchart LR
 **預期輸出範例**
 
 ```
-Loading MNIST data...
-train: 60000 samples, test: 10000 samples
-Initializing model...
-  conv1 W: (16, 1, 3, 3)  fc1 W: (3136, 128)  fc2 W: (128, 10)
-training for 5 epochs (batch_size=64, 938 batches/epoch, lr=0.01, momentum=0.9)...
-epoch 1/5  batch 100/938  loss=0.4800  avg_loss=0.6200  train_acc=83.5%
-epoch 1/5  batch 200/938  loss=0.3500  avg_loss=0.4900  train_acc=86.8%
-...
-epoch 1/5  batch 938/938  loss=0.2200  avg_loss=0.3800  train_acc=89.2%
-epoch 1/5 done  loss=0.3800  train_acc=89.2%
-...
-Evaluating on test set...
-eval batch 40/40  running_acc=97.4%
-test accuracy: 97.4%
-Weights saved to models/cnn.npz
+=== CNN Training ===
+[1/5] Loading MNIST data ...
+      train: 60000 samples
+      test:  10000 samples
+      shape: (60000, 1, 28, 28), normalized [0, 1] minus mean 0.1307
+[2/5] Initializing model ...
+      conv1 W: (16, 1, 3, 3)  fc1 W: (3136, 128)  fc2 W: (128, 10)
+[3/5] Training ...
+      5 epochs, batch_size=64, 938 batches/epoch, lr=0.01, momentum=0.9
+      epoch 1/5  batch 100/938  loss=0.4800  avg_loss=0.6200  train_acc=83.5%
+      epoch 1/5  batch 200/938  loss=0.3500  avg_loss=0.4900  train_acc=86.8%
+      ...
+      epoch 1/5 done  loss=0.3800  train_acc=89.2%
+      ...
+      epoch 4/5  lr=0.005
+      ...
+[4/5] Evaluating on test set ...
+      eval batch 40/40  running_acc=97.4%
+      test accuracy: 97.4%
+[5/5] Saving weights ...
+      Saved to models/cnn.npz
 ```
 
 #### 背景：什麼是 CNN？
@@ -818,8 +873,8 @@ python step_4_inference_cnn.py --image test.png --weights models/cnn.npz
 [3/5] Loading weights models/cnn.npz ...
       conv1 W: (16, 1, 3, 3)  fc1 W: (3136, 128)  fc2 W: (128, 10)
 [4/5] Forward pass ...
-      Conv1+ReLU  → shape (1, 8, 26, 26)
-      MaxPool     → shape (1, 8, 13, 13)
+      Conv1+ReLU  → shape (1, 16, 28, 28)
+      MaxPool     → shape (1, 16, 14, 14)
       FC128+ReLU  → shape (1, 128)
       FC10 logits → shape (1, 10)
       Softmax     → done

@@ -1,12 +1,22 @@
+"""
+步驟 1：從 Google CVDF 鏡像下載 MNIST 四個 .gz 壓縮檔，解壓至 mnist/ 目錄。
+
+產出 train/test 的圖像與標籤 IDX 原始檔，供 step 2 與 step 3 讀取。
+僅使用 Python 標準函式庫，無需額外安裝套件。
+"""
+
 import gzip
 import os
 import shutil
 import urllib.request
 
+# === 設定常數 ===
 # MNIST 官方鏡像網址
-url = "https://storage.googleapis.com/cvdf-datasets/mnist/"
+MNIST_URL = "https://storage.googleapis.com/cvdf-datasets/mnist/"
+# 輸出目錄
+MNIST_DIR = "mnist"
 # 需下載的壓縮檔清單（圖像與標籤，訓練集與測試集各一組）
-files = [
+FILES = [
     "train-images-idx3-ubyte.gz",
     "train-labels-idx1-ubyte.gz",
     "t10k-images-idx3-ubyte.gz",
@@ -20,15 +30,30 @@ def decompress_gz(gz_path: str, out_path: str) -> None:
         shutil.copyfileobj(f_in, f_out)
 
 
-os.makedirs("mnist", exist_ok=True)
+def run_download() -> None:
+    """下載並解壓全部 MNIST 檔案，印出逐步進度。"""
+    print("=== MNIST Download ===")
 
-for file in files:
-    gz_path = f"mnist/{file}"
-    # 下載壓縮檔
-    urllib.request.urlretrieve(url + file, gz_path)
-    print(f"Download complete: {file}")
+    os.makedirs(MNIST_DIR, exist_ok=True)
+    total = len(FILES)
 
-    # 解壓縮，去掉 .gz 副檔名即為輸出路徑
-    out_path = gz_path.removesuffix(".gz")
-    decompress_gz(gz_path, out_path)
-    print(f"Decompression complete: {out_path}")
+    for idx, file in enumerate(FILES, start=1):
+        print(f"[{idx}/{total}] {file}")
+        gz_path = f"{MNIST_DIR}/{file}"
+
+        print("      Downloading ...")
+        urllib.request.urlretrieve(MNIST_URL + file, gz_path)
+        print(f"      Saved to {gz_path}")
+
+        out_path = gz_path.removesuffix(".gz")
+        print("      Decompressing ...")
+        decompress_gz(gz_path, out_path)
+        print(f"      Output → {out_path}")
+
+    print(f"      All {total} IDX files ready in {MNIST_DIR}/")
+
+
+# === 主程式 ===
+
+if __name__ == "__main__":
+    run_download()

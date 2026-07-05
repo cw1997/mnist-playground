@@ -1,9 +1,17 @@
+"""
+步驟 2：讀取 mnist/ 下的 IDX 原始檔，將每張 28×28 灰階圖匯出為 PNG。
+
+依 train/test 分割與數字標籤（0–9）分類存放至 images/。
+執行前請先跑 step_1_download_mnist.py 下載 mnist/ 下的 IDX 原始檔。
+"""
+
 import os
 import struct
 import sys
 
 from PIL import Image
 
+# === 設定常數 ===
 # MNIST 原始 IDX 檔所在目錄
 MNIST_DIR = "mnist"
 # PNG 輸出根目錄
@@ -17,10 +25,10 @@ REQUIRED_FILES = [
     "t10k-labels-idx1-ubyte",
 ]
 
-# (資料集分割名稱, 圖像檔名, 標籤檔名)
+# (資料集分割名稱, 圖像檔名, 標籤檔名, 主步驟編號)
 SPLITS = [
-    ("train", "train-images-idx3-ubyte", "train-labels-idx1-ubyte"),
-    ("test", "t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte"),
+    ("train", "train-images-idx3-ubyte", "train-labels-idx1-ubyte", 2),
+    ("test", "t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte", 3),
 ]
 
 
@@ -44,14 +52,20 @@ def read_labels(path: str) -> tuple[bytes, int]:
         return f.read(count), count
 
 
-def export_split(split: str, images_file: str, labels_file: str) -> None:
+def export_split(split: str, images_file: str, labels_file: str, step: int) -> None:
     """將單一分割（train 或 test）的全部圖片匯出為 PNG。"""
+    print(f"[{step}/3] Exporting {split} split ...")
+
     pixels, count, rows, cols = read_images(f"{MNIST_DIR}/{images_file}")
     labels, label_count = read_labels(f"{MNIST_DIR}/{labels_file}")
     if count != label_count:
         raise ValueError(
             f"mismatch in {split}: {count} images vs {label_count} labels"
         )
+
+    print(f"      Images: {count} samples, {rows}×{cols}")
+    print(f"      Labels: {label_count} labels matched")
+    print(f"      Output → {OUTPUT_DIR}/{split}/{{0-9}}/")
 
     pixel_size = rows * cols
     for i in range(count):
@@ -63,15 +77,26 @@ def export_split(split: str, images_file: str, labels_file: str) -> None:
         # "L" 表示 8 位元灰階；檔名使用原始索引，與 MNIST 順序一致
         Image.frombytes("L", (cols, rows), img_bytes).save(f"{out_dir}/{i:05d}.png")
 
-    print(f"Export complete: {split} ({count} images)")
+    print(f"      Export complete: {count} images")
 
 
-# 確認 step 1 已下載所需檔案
-missing = [f for f in REQUIRED_FILES if not os.path.isfile(f"{MNIST_DIR}/{f}")]
-if missing:
-    print("Missing MNIST files:", ", ".join(missing))
-    print("Run step_1_download_mnist.py first.")
-    sys.exit(1)
+def run_export() -> None:
+    """檢查前置檔案並匯出 train/test PNG。"""
+    print("=== MNIST PNG Export ===")
 
-for split, images_file, labels_file in SPLITS:
-    export_split(split, images_file, labels_file)
+    print("[1/3] Checking MNIST files ...")
+    missing = [f for f in REQUIRED_FILES if not os.path.isfile(f"{MNIST_DIR}/{f}")]
+    if missing:
+        print("Missing MNIST files:", ", ".join(missing))
+        print("Run step_1_download_mnist.py first.")
+        sys.exit(1)
+    print("      All 4 IDX files found")
+
+    for split, images_file, labels_file, step in SPLITS:
+        export_split(split, images_file, labels_file, step)
+
+
+# === 主程式 ===
+
+if __name__ == "__main__":
+    run_export()

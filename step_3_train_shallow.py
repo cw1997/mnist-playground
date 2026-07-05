@@ -262,43 +262,43 @@ def iterate_minibatches(
         yield X[batch_idx], y[batch_idx]
 
 
-# === 主程式 ===
+# === 訓練主流程 ===
 
-if __name__ == "__main__":
-    # 確認 step 1 已下載所需檔案
-    missing = [f for f in REQUIRED_FILES if not os.path.isfile(f"{MNIST_DIR}/{f}")]
-    if missing:
-        print("Missing MNIST files:", ", ".join(missing))
-        print("Run step_1_download_mnist.py first.")
-        sys.exit(1)
 
-    np.random.seed(RANDOM_SEED)
+def run_training() -> None:
+    """載入資料、訓練 MLP、評估並保存權重，印出逐步進度。"""
+    print("=== MLP Training ===")
 
-    print("Loading MNIST data...")
+    print("[1/5] Loading MNIST data ...")
     X_train, y_train = load_mnist_split(
         "train-images-idx3-ubyte", "train-labels-idx1-ubyte"
     )
     X_test, y_test = load_mnist_split(
         "t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte"
     )
-    print(f"train: {X_train.shape[0]} samples, test: {X_test.shape[0]} samples")
+    print(f"      train: {X_train.shape[0]} samples")
+    print(f"      test:  {X_test.shape[0]} samples")
+    print(
+        f"      shape: {X_train.shape}, normalized [0, 1]"
+    )
 
     # 建立 MLP 的參數字典
     # 架構：FC(784→128) → ReLU → FC(128→10) → Softmax
-    print("Initializing model...")
+    print("[2/5] Initializing model ...")
     params = {
         "fc1": init_dense_params(INPUT_SIZE, HIDDEN_SIZE),
         "fc2": init_dense_params(HIDDEN_SIZE, NUM_CLASSES),
     }
     print(
-        f"  fc1 W: {params['fc1']['W'].shape}  "
+        f"      fc1 W: {params['fc1']['W'].shape}  "
         f"fc2 W: {params['fc2']['W'].shape}"
     )
 
     num_batches = (X_train.shape[0] + BATCH_SIZE - 1) // BATCH_SIZE
+    print("[3/5] Training ...")
     print(
-        f"training for {EPOCHS} epochs "
-        f"(batch_size={BATCH_SIZE}, {num_batches} batches/epoch, lr={LEARNING_RATE})..."
+        f"      {EPOCHS} epochs, batch_size={BATCH_SIZE}, "
+        f"{num_batches} batches/epoch, lr={LEARNING_RATE}"
     )
 
     for epoch in range(1, EPOCHS + 1):
@@ -328,7 +328,7 @@ if __name__ == "__main__":
                 samples_seen = min(batch_idx * BATCH_SIZE, train_total)
                 train_acc = correct / samples_seen
                 print(
-                    f"epoch {epoch}/{EPOCHS}  batch {batch_idx}/{num_batches}  "
+                    f"      epoch {epoch}/{EPOCHS}  batch {batch_idx}/{num_batches}  "
                     f"loss={loss:.4f}  avg_loss={avg_loss:.4f}  "
                     f"train_acc={train_acc * 100:.1f}%"
                 )
@@ -336,11 +336,11 @@ if __name__ == "__main__":
         avg_loss = total_loss / total_batches
         train_acc = correct / train_total
         print(
-            f"epoch {epoch}/{EPOCHS} done  "
+            f"      epoch {epoch}/{EPOCHS} done  "
             f"loss={avg_loss:.4f}  train_acc={train_acc * 100:.1f}%"
         )
 
-    print("Evaluating on test set...")
+    print("[4/5] Evaluating on test set ...")
     test_correct = 0
     test_total = X_test.shape[0]
     eval_batch_size = 256
@@ -354,12 +354,27 @@ if __name__ == "__main__":
         test_correct += np.sum(preds == np.argmax(y_batch, axis=1))
         if batch_idx % 100 == 0 or batch_idx == test_num_batches:
             print(
-                f"eval batch {batch_idx}/{test_num_batches}  "
+                f"      eval batch {batch_idx}/{test_num_batches}  "
                 f"running_acc={test_correct / test_total * 100:.1f}%"
             )
 
-    print(f"test accuracy: {test_correct / test_total * 100:.1f}%")
+    print(f"      test accuracy: {test_correct / test_total * 100:.1f}%")
 
+    print("[5/5] Saving weights ...")
     os.makedirs(MODELS_DIR, exist_ok=True)
     save_params(params, WEIGHTS_PATH)
-    print(f"Weights saved to {WEIGHTS_PATH}")
+    print(f"      Saved to {WEIGHTS_PATH}")
+
+
+# === 主程式 ===
+
+if __name__ == "__main__":
+    # 確認 step 1 已下載所需檔案
+    missing = [f for f in REQUIRED_FILES if not os.path.isfile(f"{MNIST_DIR}/{f}")]
+    if missing:
+        print("Missing MNIST files:", ", ".join(missing))
+        print("Run step_1_download_mnist.py first.")
+        sys.exit(1)
+
+    np.random.seed(RANDOM_SEED)
+    run_training()
