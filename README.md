@@ -364,9 +364,9 @@ Weights saved to models/mlp.npz
 |------|-------------------|------------------------------|
 | 輸入處理 | 直接展平 784 維 | 保留 (1, 28, 28) 空間結構 |
 | 特徵提取 | 無，靠全連接學全局模式 | Conv + MaxPool 提取局部筆畫特徵 |
-| 隱藏層 | FC(128) | Conv(8) + FC(128) |
+| 隱藏層 | FC(128) | Conv(16, pad=1) + FC(128) |
 | 程式複雜度 | 較低，無 im2col／卷積 | 較高，含卷積與池化 |
-| 測試準確率 | 約 92～94% | 約 94～96% |
+| 測試準確率 | 約 92～94% | 約 97～98% |
 
 #### 關鍵函式原理
 
@@ -405,10 +405,10 @@ def model_backward(probs, y_true, params, cache):
 
 ```mermaid
 flowchart LR
-  input["1x28x28"] --> conv1["Conv 8x3x3"]
+  input["1x28x28"] --> conv1["Conv 16x3x3 pad1"]
   conv1 --> relu1["ReLU"]
   relu1 --> pool1["MaxPool 2x2"]
-  pool1 --> flat["展平 1352"]
+  pool1 --> flat["展平 3136"]
   flat --> hidden["FC 128 隱藏層"]
   hidden --> relu2["ReLU"]
   relu2 --> output["FC 10"]
@@ -417,18 +417,18 @@ flowchart LR
 
 | 層 | 輸出形狀 | 說明 |
 |----|---------|------|
-| Conv1 + ReLU | 8×26×26 | 8 個 3×3 卷積核，提取筆畫邊緣 |
-| MaxPool1 | 8×13×13 | 2×2 窗口取最大值，縮小特徵圖 |
-| FC hidden + ReLU | 128 | 唯一的全連接隱藏層，輸入 8×13×13=1352 維 |
+| Conv1 + ReLU | 16×28×28 | 16 個 3×3 卷積核，padding=1 保留邊界筆畫 |
+| MaxPool1 | 16×14×14 | 2×2 窗口取最大值，縮小特徵圖 |
+| FC hidden + ReLU | 128 | 唯一的全連接隱藏層，輸入 16×14×14=3136 維 |
 | FC output + Softmax | 10 | 輸出 0～9 各類別機率 |
 
-**預設超參數**：3 epoch、batch size 64、學習率 0.01、SGD 優化器。全量 60000 筆訓練後，測試集準確率約 94～96%。
+**預設超參數**：5 epoch、batch size 64、學習率 0.01（第 4 epoch 起 ×0.5）、Momentum 0.9。像素正規化至 [0, 1] 並減 MNIST 均值 0.1307。全量 60000 筆訓練後，測試集準確率約 97～98%。
 
 **執行流程**
 
 1. 檢查 `mnist/` 下 4 個 IDX 檔是否存在
-2. 載入訓練集與測試集，像素正規化至 [0, 1]，標籤轉 one-hot
-3. 主程式內聯建立各層權重字典（`init_conv_params` + `init_dense_params`）
+2. 載入訓練集與測試集，像素正規化至 [0, 1] 並減 MNIST 均值，標籤轉 one-hot
+3. 主程式內聯建立各層權重字典（`init_conv_params` + `init_dense_params`）與 Momentum 速度字典
 4. 逐 epoch、逐 mini-batch 執行 `model_forward` → 交叉熵損失 → `model_backward` → `update_params`；每 100 個 batch 印一次進度
 5. 每 epoch 結束印摘要；主程式內聯分批評估測試集準確率
 
@@ -438,17 +438,17 @@ flowchart LR
 Loading MNIST data...
 train: 60000 samples, test: 10000 samples
 Initializing model...
-  conv1 W: (8, 1, 3, 3)  fc1 W: (1352, 128)  fc2 W: (128, 10)
-training for 3 epochs (batch_size=64, 938 batches/epoch, lr=0.01)...
-epoch 1/3  batch 100/938  loss=0.5200  avg_loss=0.6800  train_acc=82.1%
-epoch 1/3  batch 200/938  loss=0.4100  avg_loss=0.5500  train_acc=85.3%
+  conv1 W: (16, 1, 3, 3)  fc1 W: (3136, 128)  fc2 W: (128, 10)
+training for 5 epochs (batch_size=64, 938 batches/epoch, lr=0.01, momentum=0.9)...
+epoch 1/5  batch 100/938  loss=0.4800  avg_loss=0.6200  train_acc=83.5%
+epoch 1/5  batch 200/938  loss=0.3500  avg_loss=0.4900  train_acc=86.8%
 ...
-epoch 1/3  batch 938/938  loss=0.2800  avg_loss=0.4500  train_acc=87.5%
-epoch 1/3 done  loss=0.4500  train_acc=87.5%
+epoch 1/5  batch 938/938  loss=0.2200  avg_loss=0.3800  train_acc=89.2%
+epoch 1/5 done  loss=0.3800  train_acc=89.2%
 ...
 Evaluating on test set...
-eval batch 40/40  running_acc=95.2%
-test accuracy: 95.2%
+eval batch 40/40  running_acc=97.4%
+test accuracy: 97.4%
 Weights saved to models/cnn.npz
 ```
 
@@ -477,13 +477,13 @@ Weights saved to models/cnn.npz
 
 ```python
 params = {
-    "conv1": init_conv_params(1, 8, kernel_size=3),
+    "conv1": init_conv_params(1, 16, kernel_size=3, padding=1),
     "fc1": init_dense_params(FLAT_SIZE, 128),
     "fc2": init_dense_params(128, NUM_CLASSES),
 }
-# params["conv1"]["W"]  → 卷積濾鏡權重，形狀 (8, 1, 3, 3)
+# params["conv1"]["W"]  → 卷積濾鏡權重，形狀 (16, 1, 3, 3)
 # params["conv1"]["dW"] → 該層權重的梯度（反向傳播累積）
-# params["fc1"]["W"]    → 隱藏層權重，形狀 (1352, 128)
+# params["fc1"]["W"]    → 隱藏層權重，形狀 (3136, 128)
 ```
 
 | 鍵 | 內容 |
@@ -501,7 +501,7 @@ def load_mnist_split(images_file: str, labels_file: str) -> tuple[np.ndarray, np
     pixels, count, rows, cols = read_images(f"{MNIST_DIR}/{images_file}")
     labels, label_count = read_labels(f"{MNIST_DIR}/{labels_file}")
     # ...
-    X = pixels.reshape(count, 1, rows, cols).astype(np.float64) / 255.0
+    X = pixels.reshape(count, 1, rows, cols).astype(np.float64) / 255.0 - MNIST_MEAN
     y = np.zeros((count, NUM_CLASSES), dtype=np.float64)
     y[np.arange(count), labels] = 1.0
     return X, y
@@ -511,9 +511,9 @@ def load_mnist_split(images_file: str, labels_file: str) -> tuple[np.ndarray, np
 
 同樣解析 IDX 檔頭與 payload，但直接轉成 NumPy 陣列，不寫 PNG。
 
-**2. 正規化 `÷ 255.0`**
+**2. 正規化 `÷ 255.0` 並減 MNIST 均值**
 
-原始像素 0～255，縮放到 0～1。好處是梯度更新更穩定，避免數值過大導致發散。
+原始像素 0～255，縮放到 0～1，再減 0.1307 做零均值化。好處是梯度更新更穩定，避免數值過大導致發散。
 
 **3. 形狀 `(N, 1, 28, 28)`**
 
@@ -533,23 +533,23 @@ def load_mnist_split(images_file: str, labels_file: str) -> tuple[np.ndarray, np
 
 ```
 輸入圖像 (1, 28, 28)
-    ↓ im2col（每個 3×3 窗口展開成 9 維向量）
-col 矩陣 (9, 676)     ← 676 = 26×26 個窗口位置
+    ↓ im2col（每個 3×3 窗口展開成 9 維向量，padding=1）
+col 矩陣 (9, 784)     ← 784 = 28×28 個窗口位置
     ↓ 矩陣乘法：W_col @ col
-輸出 (8, 676)         ← 8 個濾鏡
+輸出 (16, 784)        ← 16 個濾鏡
     ↓ reshape
-輸出 (8, 26, 26)
+輸出 (16, 28, 28)
 ```
 
 `col2im` 是逆運算：反向傳播時，同一像素可能參與多個窗口，需把各窗口的梯度**加總**回原始圖像位置。
 
-輸出邊長公式（本專案無 padding、stride=1）：
+輸出邊長公式（stride=1）：
 
 ```
-out_size = (input_size - kernel_size) // stride + 1
+out_size = (input_size + 2*padding - kernel_size) // stride + 1
 ```
 
-例如 28×28 圖做 3×3 卷積：`(28 - 3) // 1 + 1 = 26`。
+例如 28×28 圖做 3×3 卷積、padding=1：`(28 + 2 - 3) // 1 + 1 = 28`。
 
 #### 激活函式與損失
 
@@ -601,14 +601,14 @@ def conv_backward(dout, params, cache):
 
 | 成員 | 形狀 | 說明 |
 |------|------|------|
-| `W` | `(out_ch, in_ch, k, k)` | 卷積核權重，例如 `(8, 1, 3, 3)` |
+| `W` | `(out_ch, in_ch, k, k)` | 卷積核權重，例如 `(16, 1, 3, 3)` |
 | `b` | `(out_ch,)` | 每個濾鏡一個偏置 |
 | 輸入 `x` | `(batch, in_ch, H, W)` | 一批圖像 |
 | 輸出 | `(batch, out_ch, H', W')` | 特徵圖 |
 
 - **He 初始化**：`scale = sqrt(2 / (in_ch × k × k))`，適合 ReLU，避免初始輸出過大或過小。
 - **反向傳播**：依鏈式法則計算 `dW`、`db`、`dx`；`dW` 來自 `dout @ col.T`，`dx` 經 `col2im` 還原。
-- **SGD 更新**：`W -= learning_rate × dW`。
+- **SGD + Momentum 更新**：`v = momentum*v - lr*grad`；`W += v`；第 4 epoch 起學習率 ×0.5。
 
 #### `maxpool_forward`／`maxpool_backward` 原理
 
@@ -619,7 +619,7 @@ def conv_backward(dout, params, cache):
       [3, 6]]
 ```
 
-前向傳播時用 `cache["max_mask"]` 記錄最大值位置；反向傳播時，上游梯度**只傳給**那個位置，其餘為 0。這能縮小特徵圖（26→13），減少後續計算量。
+前向傳播時用 `cache["max_mask"]` 記錄最大值位置；反向傳播時，上游梯度**只傳給**那個位置，其餘為 0。這能縮小特徵圖（28→14），減少後續計算量。
 
 #### `dense_forward`／`dense_backward` 原理
 
@@ -627,7 +627,7 @@ def conv_backward(dout, params, cache):
 
 | 成員 | 形狀 | 說明 |
 |------|------|------|
-| `W` | `(in_features, out_features)` | 例如 `(1352, 128)` |
+| `W` | `(in_features, out_features)` | 例如 `(3136, 128)` |
 | `b` | `(out_features,)` | 偏置向量 |
 | 輸入 `x` | `(batch, in_features)` | 展平後的特徵 |
 | 輸出 | `(batch, out_features)` | 新特徵或類別分數 |
@@ -642,7 +642,7 @@ def model_forward(x, params):
     c1, conv1_cache = conv_forward(x, params["conv1"])
     r1 = relu(c1)
     p1, pool1_cache = maxpool_forward(r1)
-    flat = p1.reshape(batch, -1)           # (batch, 1352)
+    flat = p1.reshape(batch, -1)           # (batch, 3136)
     f1 = dense_forward(flat, params["fc1"])  # 唯一隱藏層
     r3 = relu(f1)
     logits = dense_forward(r3, params["fc2"])
@@ -659,8 +659,8 @@ def model_backward(probs, y_true, params, cache):
 **特徵圖尺寸推導**（單張 28×28 輸入）：
 
 ```
-28×28  → Conv3×3 → 26×26 → Pool2×2 → 13×13
-       → 展平 8×13×13 = 1352 維
+28×28  → Conv3×3 pad1 → 28×28 → Pool2×2 → 14×14
+       → 展平 16×14×14 = 3136 維
        → FC 128（隱藏層）→ FC 10（輸出層）
 ```
 
@@ -804,7 +804,7 @@ python step_4_inference_cnn.py --image test.png --weights models/cnn.npz
 1. 解析 `--image`（預設 `test.png`）與 `--weights`（預設 `models/cnn.npz`）
 2. 檢查圖片與權重檔是否存在
 3. `[1/5]` 以 Pillow 讀取圖片
-4. `[2/5]` 轉灰階、縮放 28×28、正規化至 [0, 1]
+4. `[2/5]` 轉灰階、縮放 28×28、正規化至 [0, 1] 並減 MNIST 均值 0.1307
 5. `[3/5]` 從 `.npz` 載入 conv1、fc1、fc2 權重，卷積超參數與 step 3b 一致
 6. `[4/5]` 前向傳播：Conv → ReLU → MaxPool → FC → ReLU → FC → Softmax
 7. `[5/5]` 印出 10 類機率、預測數字、置信度
@@ -816,7 +816,7 @@ python step_4_inference_cnn.py --image test.png --weights models/cnn.npz
 [1/5] Loading image ...
 [2/5] Preprocessing ...
 [3/5] Loading weights models/cnn.npz ...
-      conv1 W: (8, 1, 3, 3)  fc1 W: (1352, 128)  fc2 W: (128, 10)
+      conv1 W: (16, 1, 3, 3)  fc1 W: (3136, 128)  fc2 W: (128, 10)
 [4/5] Forward pass ...
       Conv1+ReLU  → shape (1, 8, 26, 26)
       MaxPool     → shape (1, 8, 13, 13)

@@ -1,7 +1,7 @@
 """
 步驟 4（CNN 推理）：載入 step 3 訓練的 CNN 權重，對輸入圖片做數字辨識。
 
-架構：Conv(8) → ReLU → MaxPool → FC(128) → ReLU → FC(10) → Softmax。
+架構：Conv(16, pad=1) → ReLU → MaxPool → FC(128) → ReLU → FC(10) → Softmax。
 輸出逐層推理進度、10 個數字的機率，以及最高置信度預測。
 
 執行前請先跑 step_3_train_cnn.py 產生 models/cnn.npz。
@@ -22,12 +22,13 @@ DEFAULT_WEIGHTS = f"{MODELS_DIR}/cnn.npz"
 NUM_CLASSES = 10
 IMAGE_SIZE = (28, 28)
 
-# 與 step_3_train_cnn.py 一致的卷積超參數
+# 與 step_3_train_cnn.py 一致的前處理與卷積超參數
+MNIST_MEAN = 0.1307
 CONV_IN_CHANNELS = 1
-CONV_OUT_CHANNELS = 8
+CONV_OUT_CHANNELS = 16
 CONV_KERNEL_SIZE = 3
 CONV_STRIDE = 1
-CONV_PADDING = 0
+CONV_PADDING = 1
 
 
 # === 圖片前處理 ===
@@ -43,7 +44,7 @@ def load_image_as_tensor(path: str) -> tuple[np.ndarray, tuple[int, int], str]:
         mode = img.mode
         gray = img.convert("L")
         resized = gray.resize(IMAGE_SIZE, Image.LANCZOS)
-        pixels = np.asarray(resized, dtype=np.float64) / 255.0
+        pixels = np.asarray(resized, dtype=np.float64) / 255.0 - MNIST_MEAN
     tensor = pixels.reshape(1, 1, IMAGE_SIZE[1], IMAGE_SIZE[0])
     return tensor, original_size, mode
 

@@ -1,7 +1,7 @@
 """
 步驟 3（CNN 版）：用純 NumPy 手寫卷積神經網路（CNN），訓練 MNIST 手寫數字辨識模型。
 
-架構：Conv(8) → ReLU → MaxPool → FC(128) → ReLU → FC(10) → Softmax。
+架構：Conv(16, pad=1) → ReLU → MaxPool → FC(128) → ReLU → FC(10) → Softmax。
 若只想先學全連接網路，可改跑 step_3_train_shallow.py（784→128→10 的 MLP）。
 
 本檔案包含從資料讀取、卷積／池化、前向傳播、反向傳播到訓練迴圈的全部邏輯。
@@ -28,16 +28,30 @@ REQUIRED_FILES = [
 ]
 
 # 訓練超參數（可依需求調整）
-EPOCHS = 3          # 整份訓練集掃過幾輪；越大通常越準，但越慢
+EPOCHS = 5          # 整份訓練集掃過幾輪；越大通常越準，但越慢
 BATCH_SIZE = 64     # 每次更新權重用多少筆樣本；太大可能學不細，太小可能不穩
-LEARNING_RATE = 0.01  # 學習率：權重每次更新的步幅；太大容易發散，太小學太慢
+LEARNING_RATE = 0.01  # 學習率：權重每次更新的步幅；第 4 epoch 起 ×0.5
+MOMENTUM = 0.9      # Momentum SGD：累積歷史梯度方向，加速收斂
 RANDOM_SEED = 42    # 固定亂數種子，讓每次執行結果可重現
 
 # MNIST 有 10 個類別（數字 0～9）
 NUM_CLASSES = 10
 
-# 卷積後展平維度：8 個通道 × 13 × 13（28→Conv→26→Pool→13）
-FLAT_SIZE = 8 * 13 * 13
+# MNIST 訓練集像素均值（÷255 後）；零均值正規化有助收斂
+MNIST_MEAN = 0.1307
+
+# 網路架構常數
+IMAGE_SIZE = 28
+CONV_OUT_CHANNELS = 16
+CONV_KERNEL_SIZE = 3
+CONV_PADDING = 1
+POOL_SIZE = 2
+HIDDEN_SIZE = 128
+
+# 卷積後展平維度：16 通道 × 14 × 14（28→Conv pad1→28→Pool→14）
+_conv_spatial = IMAGE_SIZE + 2 * CONV_PADDING - CONV_KERNEL_SIZE + 1
+_pool_spatial = _conv_spatial // POOL_SIZE
+FLAT_SIZE = CONV_OUT_CHANNELS * _pool_spatial * _pool_spatial
 
 # 訓練完成後保存權重的目錄與檔案（供 step 4 推理使用）
 MODELS_DIR = "models"
@@ -73,7 +87,7 @@ def read_labels(path: str) -> tuple[np.ndarray, int]:
 def load_mnist_split(images_file: str, labels_file: str) -> tuple[np.ndarray, np.ndarray]:
     """
     載入單一分割（train 或 test），回傳：
-    - X: 形狀 (N, 1, 28, 28)，像素已正規化到 0～1
+    - X: 形狀 (N, 1, 28, 28)，像素已正規化到 0～1 並減去 MNIST 均值
     - y: 形狀 (N, 10) 的 one-hot 標籤
     """
     pixels, count, rows, cols = read_images(f"{MNIST_DIR}/{images_file}")
@@ -83,8 +97,8 @@ def load_mnist_split(images_file: str, labels_file: str) -> tuple[np.ndarray, np
             f"mismatch: {count} images vs {label_count} labels in {images_file}"
         )
 
-    # 正規化：把 0～255 縮放到 0～1，讓梯度更新更穩定
-    X = pixels.reshape(count, 1, rows, cols).astype(np.float64) / 255.0
+    # 正規化：0～255 → 0～1，再減 MNIST 均值做零均值化
+    X = pixels.reshape(count, 1, rows, cols).astype(np.float64) / 255.0 - MNIST_MEAN
 
     # one-hot：把類別數字（例如 3）變成 [0,0,0,1,0,0,0,0,0,0]
     # 交叉熵損失需要這種格式來比較「預測機率」與「正確答案」
@@ -115,7 +129,7 @@ def im2col(
     """
     batch, channel, height, width = x.shape
     if padding > 0:
-        # 在四周補 0，讓卷積後的特徵圖不會縮太小（本專案預設 padding=0）
+        # 在四周補 0，讓卷積後的特徵圖不會縮太小
         x = np.pad(
             x,
             ((0, 0), (0, 0), (padding, padding), (padding, padding)),
@@ -223,6 +237,7 @@ def init_conv_params(
     in_channels: int,
     out_channels: int,
     kernel_size: int = 3,
+    padding: int = 0,
 ) -> dict:
     """建立卷積層參數字典。He 初始化適合 ReLU。"""
     scale = np.sqrt(2.0 / (in_channels * kernel_size * kernel_size))
@@ -237,7 +252,7 @@ def init_conv_params(
         "out_channels": out_channels,
         "kernel_size": kernel_size,
         "stride": 1,
-        "padding": 0,
+        "padding": padding,
     }
 
 
@@ -275,9 +290,8 @@ def conv_forward(x: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
     col, out_h, out_w = im2col(x, kernel_size, stride, padding)
     W_col = W.reshape(out_channels, -1)
 
-    out = np.zeros((batch, out_channels, col.shape[2]), dtype=np.float64)
-    for i in range(batch):
-        out[i] = W_col @ col[i] + b.reshape(-1, 1)
+    # batch 向量化：col (batch, in*kh*kw, out_h*out_w)，W_col (out_ch, in*kh*kw)
+    out = np.einsum("oi,bil->bol", W_col, col) + b.reshape(1, -1, 1)
 
     cache = {
         "x": x,
@@ -304,14 +318,10 @@ def conv_backward(dout: np.ndarray, params: dict, cache: dict) -> np.ndarray:
     W_col = W.reshape(out_channels, -1)
     dout_col = dout.reshape(batch, out_channels, -1)
 
-    for i in range(batch):
-        params["dW"] += (dout_col[i] @ col[i].T).reshape(W.shape)
-        params["db"] += dout_col[i].sum(axis=1)
+    params["dW"] += np.einsum("bol,bil->oi", dout_col, col).reshape(W.shape)
+    params["db"] += dout_col.sum(axis=(0, 2))
 
-    dcol = np.zeros_like(col)
-    for i in range(batch):
-        dcol[i] = W_col.T @ dout_col[i]
-
+    dcol = np.einsum("oi,bol->bil", W_col, dout_col)
     return col2im(dcol, x.shape, kernel_size, stride, padding)
 
 
@@ -401,8 +411,9 @@ def model_forward(x: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
     r1 = relu(c1)
     cache["r1"] = r1
 
-    p1, pool1_cache = maxpool_forward(r1)
+    p1, pool1_cache = maxpool_forward(r1, pool_size=POOL_SIZE, stride=POOL_SIZE)
     cache["pool1"] = pool1_cache
+    cache["p1"] = p1
 
     flat = p1.reshape(p1.shape[0], -1)
     cache["flat"] = flat
@@ -428,7 +439,7 @@ def model_backward(probs: np.ndarray, y_true: np.ndarray, params: dict, cache: d
     dout = relu_backward(cache["f1"], dout)
     dout = dense_backward(dout, params["fc1"], cache["flat"])
 
-    dout = dout.reshape(-1, 8, 13, 13)
+    dout = dout.reshape(dout.shape[0], *cache["p1"].shape[1:])
 
     dout = maxpool_backward(dout, cache["pool1"])
     dout = relu_backward(cache["c1"], dout)
@@ -437,17 +448,32 @@ def model_backward(probs: np.ndarray, y_true: np.ndarray, params: dict, cache: d
 
 def zero_grads(params: dict) -> None:
     """把各層累積的梯度清零，準備下一個 batch。"""
-    for layer in ("conv1", "fc1", "fc2"):
-        params[layer]["dW"].fill(0)
-        params[layer]["db"].fill(0)
+    for layer in params.values():
+        layer["dW"].fill(0)
+        layer["db"].fill(0)
 
 
-def update_params(params: dict, learning_rate: float) -> None:
-    """SGD：所有層沿梯度反方向更新權重。"""
-    for layer in ("conv1", "fc1", "fc2"):
-        p = params[layer]
-        p["W"] -= learning_rate * p["dW"]
-        p["b"] -= learning_rate * p["db"]
+def init_velocity(params: dict) -> dict:
+    """為 Momentum SGD 建立與各層 W、b 同形的速度字典。"""
+    return {
+        name: {
+            "vW": np.zeros_like(layer["W"]),
+            "vb": np.zeros_like(layer["b"]),
+        }
+        for name, layer in params.items()
+    }
+
+
+def update_params(
+    params: dict, velocity: dict, learning_rate: float, momentum: float
+) -> None:
+    """Momentum SGD：v = momentum*v - lr*grad；W += v。"""
+    for name, layer in params.items():
+        v = velocity[name]
+        v["vW"] = momentum * v["vW"] - learning_rate * layer["dW"]
+        v["vb"] = momentum * v["vb"] - learning_rate * layer["db"]
+        layer["W"] += v["vW"]
+        layer["b"] += v["vb"]
 
 
 def predict(x: np.ndarray, params: dict) -> np.ndarray:
@@ -512,13 +538,16 @@ if __name__ == "__main__":
     print(f"train: {X_train.shape[0]} samples, test: {X_test.shape[0]} samples")
 
     # 建立整個 CNN 的參數字典
-    # 架構：Conv(8) → ReLU → MaxPool → FC(128) → ReLU → FC(10) → Softmax
+    # 架構：Conv(16, pad=1) → ReLU → MaxPool → FC(128) → ReLU → FC(10) → Softmax
     print("Initializing model...")
     params = {
-        "conv1": init_conv_params(1, 8, kernel_size=3),
-        "fc1": init_dense_params(FLAT_SIZE, 128),
-        "fc2": init_dense_params(128, NUM_CLASSES),
+        "conv1": init_conv_params(
+            1, CONV_OUT_CHANNELS, kernel_size=CONV_KERNEL_SIZE, padding=CONV_PADDING
+        ),
+        "fc1": init_dense_params(FLAT_SIZE, HIDDEN_SIZE),
+        "fc2": init_dense_params(HIDDEN_SIZE, NUM_CLASSES),
     }
+    velocity = init_velocity(params)
     print(
         f"  conv1 W: {params['conv1']['W'].shape}  "
         f"fc1 W: {params['fc1']['W'].shape}  "
@@ -528,10 +557,12 @@ if __name__ == "__main__":
     num_batches = (X_train.shape[0] + BATCH_SIZE - 1) // BATCH_SIZE
     print(
         f"training for {EPOCHS} epochs "
-        f"(batch_size={BATCH_SIZE}, {num_batches} batches/epoch, lr={LEARNING_RATE})..."
+        f"(batch_size={BATCH_SIZE}, {num_batches} batches/epoch, "
+        f"lr={LEARNING_RATE}, momentum={MOMENTUM})..."
     )
 
     for epoch in range(1, EPOCHS + 1):
+        lr = LEARNING_RATE * (0.5 if epoch >= 4 else 1.0)
         total_loss = 0.0
         total_batches = 0
         correct = 0
@@ -545,7 +576,7 @@ if __name__ == "__main__":
             probs, cache = model_forward(X_batch, params)
             loss = cross_entropy_loss(probs, y_batch)
             model_backward(probs, y_batch, params, cache)
-            update_params(params, LEARNING_RATE)
+            update_params(params, velocity, lr, MOMENTUM)
 
             total_loss += loss
             total_batches += 1
