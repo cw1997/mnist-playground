@@ -12,7 +12,6 @@
 import os
 import struct
 import sys
-from collections.abc import Iterator
 
 import numpy as np
 
@@ -319,45 +318,6 @@ def backward(probs: np.ndarray, y_true: np.ndarray, params: dict, cache: dict) -
     params["fc1"]["db"] += np.sum(dout, axis=0)  # sum：沿 batch 維加總 → (128,)
 
 
-def zero_grads(params: dict) -> None:
-    """將各層累積的梯度清零，準備下一個 mini-batch 更新。
-
-    參數
-    ----
-    params : dict
-        模型參數字典，含 ``"fc1"`` 與 ``"fc2"``；各層 ``"dW"``、``"db"`` 設為 0。
-
-    回傳
-    ----
-    None
-        無回傳值；原地修改 ``params`` 中的梯度陣列。
-    """
-    for layer in ("fc1", "fc2"):
-        params[layer]["dW"].fill(0)  # fill：原地將陣列所有元素設為 0
-        params[layer]["db"].fill(0)  # fill：原地將陣列所有元素設為 0
-
-
-def update_params(params: dict, learning_rate: float) -> None:
-    """以 SGD 沿梯度反方向更新所有層權重與偏置。
-
-    參數
-    ----
-    params : dict
-        模型參數字典，含 ``"fc1"`` 與 ``"fc2"``；各層須已有 ``"dW"``、``"db"``。
-    learning_rate : float
-        學習率，控制每次更新的步幅（例如 0.01）。
-
-    回傳
-    ----
-    None
-        無回傳值；原地更新各層 ``"W"`` 與 ``"b"``。
-    """
-    for layer in ("fc1", "fc2"):
-        p = params[layer]
-        p["W"] -= learning_rate * p["dW"]
-        p["b"] -= learning_rate * p["db"]
-
-
 def predict(x: np.ndarray, params: dict) -> np.ndarray:
     """對輸入批次做前向推理，回傳每筆樣本預測的數字類別。
 
@@ -375,65 +335,6 @@ def predict(x: np.ndarray, params: dict) -> np.ndarray:
     """
     probs, _ = forward(x, params)  # _ 表示忽略 cache
     return np.argmax(probs, axis=1)  # argmax：每列 10 個機率中取最大值 index → 預測數字
-
-
-def save_params(params: dict, path: str) -> None:
-    """將各層 W、b 保存為壓縮 .npz 檔，供 step 4 推理載入。
-
-    參數
-    ----
-    params : dict
-        模型參數字典，含 ``"fc1"`` 與 ``"fc2"``；僅保存 ``"W"``、``"b"``。
-    path : str
-        輸出 .npz 檔路徑（例如 ``models/mlp.npz``）。
-
-    回傳
-    ----
-    None
-        無回傳值；權重寫入 ``path`` 指定的 .npz 檔。
-    """
-    np.savez_compressed(  # savez_compressed：以壓縮格式將多個 ndarray 寫入單一 .npz
-        path,
-        fc1_W=params["fc1"]["W"],
-        fc1_b=params["fc1"]["b"],
-        fc2_W=params["fc2"]["W"],
-        fc2_b=params["fc2"]["b"],
-    )
-
-
-# === 訓練與評估 ===
-
-def iterate_minibatches(
-    X: np.ndarray, y: np.ndarray, batch_size: int, shuffle: bool = True
-) -> Iterator[tuple[np.ndarray, np.ndarray]]:
-    """將資料集切成 mini-batch 生成器，可選擇每 epoch 打亂順序。
-
-    參數
-    ----
-    X : np.ndarray
-        特徵陣列，形狀 ``(N, 1, 28, 28)``。
-    y : np.ndarray
-        one-hot 標籤，形狀 ``(N, 10)``。
-    batch_size : int
-        每批樣本數（例如 64）。
-    shuffle : bool, optional
-        是否在每 epoch 開始前打亂索引，預設 ``True``。
-
-    回傳
-    ----
-    Iterator[tuple[np.ndarray, np.ndarray]]
-        生成器，每次 yield 一批 ``(X_batch, y_batch)``，
-        ``X_batch`` 形狀 ``(batch, 1, 28, 28)``，``y_batch`` 形狀 ``(batch, 10)``。
-    """
-    n = X.shape[0]
-    indices = np.arange(n)  # arange：產生 [0, 1, ..., n-1]，每筆樣本的索引
-    if shuffle:
-        np.random.shuffle(indices)  # shuffle：原地打亂索引順序
-
-    for start in range(0, n, batch_size):
-        end = min(start + batch_size, n)
-        batch_idx = indices[start:end]  # 切片取出這批的索引
-        yield X[batch_idx], y[batch_idx]  # 用索引取出對應的 X 和 y
 
 
 # === 主程式 ===
@@ -488,14 +389,28 @@ if __name__ == "__main__":
         train_total = X_train.shape[0]
 
         batch_idx = 0
-        minibatches = iterate_minibatches(X_train, y_train, BATCH_SIZE, shuffle=True)
-        for X_batch, y_batch in minibatches:
+        indices = np.arange(train_total)  # arange：產生 [0, 1, ..., train_total-1]
+        np.random.shuffle(indices)  # shuffle：每 epoch 打亂樣本順序
+
+        for start in range(0, train_total, BATCH_SIZE):
+            end = min(start + BATCH_SIZE, train_total)
+            batch_indices = indices[start:end]  # 切片取出這批的索引
+            X_batch = X_train[batch_indices]
+            y_batch = y_train[batch_indices]
             batch_idx += 1
-            zero_grads(params)
+
+            for layer in ("fc1", "fc2"):
+                params[layer]["dW"].fill(0)  # fill：梯度清零，準備本批累加
+                params[layer]["db"].fill(0)
+
             probs, cache = forward(X_batch, params)
             loss = cross_entropy_loss(probs, y_batch)
             backward(probs, y_batch, params, cache)
-            update_params(params, LEARNING_RATE)
+
+            for layer in ("fc1", "fc2"):
+                p = params[layer]
+                p["W"] -= LEARNING_RATE * p["dW"]  # SGD：沿梯度反方向更新權重
+                p["b"] -= LEARNING_RATE * p["db"]
 
             total_loss += loss
             total_batches += 1
@@ -545,5 +460,11 @@ if __name__ == "__main__":
 
     print("[5/5] Saving weights ...")
     os.makedirs(MODELS_DIR, exist_ok=True)
-    save_params(params, WEIGHTS_PATH)
+    np.savez_compressed(  # savez_compressed：以壓縮格式將多個 ndarray 寫入單一 .npz
+        WEIGHTS_PATH,
+        fc1_W=params["fc1"]["W"],
+        fc1_b=params["fc1"]["b"],
+        fc2_W=params["fc2"]["W"],
+        fc2_b=params["fc2"]["b"],
+    )
     print(f"      Saved to {WEIGHTS_PATH}")

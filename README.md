@@ -381,8 +381,8 @@ flowchart LR
 1. 檢查 `mnist/` 下 4 個 IDX 檔是否存在
 2. 載入訓練集與測試集，像素正規化至 [0, 1]，標籤轉 one-hot
 3. 主程式內聯建立 `fc1`（784→128）與 `fc2`（128→10）權重字典
-4. 逐 epoch、逐 mini-batch 執行 `forward` → 交叉熵損失 → `backward` → `update_params`
-5. 每 epoch 結束印摘要；主程式內聯分批評估測試集準確率
+4. 逐 epoch 打亂索引、切 mini-batch，執行梯度清零 → `forward` → 交叉熵損失 → `backward` → SGD 更新權重（皆內聯於主程式）
+5. 每 epoch 結束印摘要；主程式內聯分批評估測試集準確率；最後以 `np.savez_compressed` 寫入 `models/mlp.npz`
 
 **預期輸出範例**
 
