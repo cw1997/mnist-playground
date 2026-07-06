@@ -108,8 +108,8 @@ def export_split(split: str, images_file: str, labels_file: str, step: int) -> N
     """
     print(f"[{step}/3] Exporting {split} split ...")
 
-    pixels, count, rows, cols = read_images(f"{MNIST_DIR}/{images_file}")
-    labels, label_count = read_labels(f"{MNIST_DIR}/{labels_file}")
+    pixels, count, rows, cols = read_images(f"{MNIST_DIR}/{images_file}")  # 讀取圖像像素與張數、高、寬
+    labels, label_count = read_labels(f"{MNIST_DIR}/{labels_file}")  # 讀取每張圖對應的數字標籤 0~9
     if count != label_count:
         raise ValueError(
             f"mismatch in {split}: {count} images vs {label_count} labels"
@@ -161,7 +161,7 @@ def run_export() -> None:
     print("      All 4 IDX files found")
 
     for split, images_file, labels_file, step in SPLITS:
-        export_split(split, images_file, labels_file, step)
+        export_split(split, images_file, labels_file, step)  # 依 train/test 匯出 PNG 至 images/
 
 
 # === 主程式 ===

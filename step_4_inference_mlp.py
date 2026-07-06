@@ -224,7 +224,7 @@ def run_inference(image_path: str, weights_path: str) -> None:
     print(f"=== Inference: {image_path} ===")
 
     print("[1/5] Loading image ...")
-    tensor, original_size, mode = load_image_as_tensor(image_path)
+    tensor, original_size, mode = load_image_as_tensor(image_path)  # 讀圖並轉成 (1,1,28,28) 張量
     print(f"      Original size: {original_size[0]}×{original_size[1]}, mode: {mode}")
 
     print("[2/5] Preprocessing ...")
@@ -235,17 +235,17 @@ def run_inference(image_path: str, weights_path: str) -> None:
     )
 
     print(f"[3/5] Loading weights {weights_path} ...")
-    params = load_params(weights_path)
+    params = load_params(weights_path)  # 從 .npz 載入 fc1、fc2 權重
     print(
         f"      fc1 W: {params['fc1']['W'].shape}  "
         f"fc2 W: {params['fc2']['W'].shape}"
     )
 
     print("[4/5] Forward pass ...")
-    probs = model_forward_verbose(tensor, params)
+    probs = model_forward_verbose(tensor, params)  # 前向推理並印出各層 shape
 
     print("[5/5] Inference result")
-    print_probs(probs)
+    print_probs(probs)  # 印出 0~9 各類機率與最高置信度預測
 
 
 # === 主程式 ===

@@ -70,7 +70,7 @@ def read_images(path: str) -> tuple[np.ndarray, int, int, int]:
     """
     with open(path, "rb") as f:
         # 大端序：magic(2051)、張數、列數、行數
-        magic, count, rows, cols = struct.unpack(">IIII", f.read(16))
+        magic, count, rows, cols = struct.unpack(">IIII", f.read(16))  # unpack：讀檔頭得張數與每張圖 28×28 的維度
         if magic != 2051:
             raise ValueError(f"unexpected magic number in {path}: {magic}")
         # 每個像素是 0～255 的整數，先讀成 uint8 再轉 float
@@ -94,7 +94,7 @@ def read_labels(path: str) -> tuple[np.ndarray, int]:
         - count：int，標籤筆數
     """
     with open(path, "rb") as f:
-        magic, count = struct.unpack(">II", f.read(8))
+        magic, count = struct.unpack(">II", f.read(8))  # unpack：讀檔頭得標籤筆數
         if magic != 2049:
             raise ValueError(f"unexpected magic number in {path}: {magic}")
         labels = np.frombuffer(f.read(count), dtype=np.uint8)  # frombuffer：將二進位 bytes 直接解讀為一維標籤陣列
@@ -118,8 +118,8 @@ def load_mnist_split(images_file: str, labels_file: str) -> tuple[np.ndarray, np
         - X：np.ndarray，形狀 ``(N, 1, 28, 28)``，像素正規化至 0～1，dtype float64
         - y：np.ndarray，形狀 ``(N, 10)``，one-hot 編碼標籤，dtype float64
     """
-    pixels, count, rows, cols = read_images(f"{MNIST_DIR}/{images_file}")
-    labels, label_count = read_labels(f"{MNIST_DIR}/{labels_file}")
+    pixels, count, rows, cols = read_images(f"{MNIST_DIR}/{images_file}")  # 讀取圖像像素與張數、高、寬
+    labels, label_count = read_labels(f"{MNIST_DIR}/{labels_file}")  # 讀取每張圖對應的數字標籤 0~9
     if count != label_count:
         raise ValueError(
             f"mismatch: {count} images vs {label_count} labels in {images_file}"
@@ -292,8 +292,8 @@ def init_dense_params(in_features: int, out_features: int) -> dict:
     weights = np.random.randn(in_features, out_features) * scale  # randn：產生標準常態亂數，再乘以 scale
     bias = np.zeros(out_features, dtype=np.float64)  # zeros：建立長度 out_features 的全 0 偏置向量
     return {
-        "weights": weights,
-        "bias": bias,
+        "weights": weights,  # 這層的權重矩陣
+        "bias": bias,  # 這層的偏置向量
         "grad_weights": np.zeros_like(weights),  # zeros_like：建立與 weights 同形狀的全 0 梯度矩陣
         "grad_bias": np.zeros_like(bias),  # zeros_like：建立與 bias 同形狀的全 0 梯度向量
     }
@@ -322,27 +322,27 @@ def forward(x: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
         - probs：np.ndarray，形狀 ``(batch, 10)``，各類別預測機率
         - cache：dict，前向中間結果，含 ``"flattened_input"``、``"hidden_linear"``、``"hidden_relu"``、``"logits"``
     """
-    cache: dict = {}
+    cache: dict = {}  # 暫存前向中間結果，反向傳播時要用
 
     # 把二維影像的像素點展平成一維，變成 784 維的向量
     flattened_input = x.reshape(x.shape[0], -1)  # reshape：-1 表示其餘維度自動計算 → (batch, 784)
-    cache["flattened_input"] = flattened_input
+    cache["flattened_input"] = flattened_input  # 存展平結果，fc1 反向時要用
 
     # 第一層全連接層，784 維的向量乘以 128 維的權重，加上 128 維的偏置，得到 128 維的 hidden_linear
     hidden_linear = flattened_input @ params["fc1"]["weights"] + params["fc1"]["bias"]  # @：矩陣乘法 (batch, 784) × (784, 128)
-    cache["hidden_linear"] = hidden_linear
+    cache["hidden_linear"] = hidden_linear  # 存 ReLU 前數值，判斷哪些位置要截斷梯度
 
     # ReLU 激活函式，把負值變成 0，正值不變
-    hidden_relu = relu(hidden_linear)
-    cache["hidden_relu"] = hidden_relu
+    hidden_relu = relu(hidden_linear)  # ReLU：負值歸零，只保留正特徵
+    cache["hidden_relu"] = hidden_relu  # 存隱藏層輸出，fc2 反向時要用
 
     # 最後一層輸出分數（logits），128 維的向量乘以 10 維的權重，加上 10 維的偏置，得到 10 維的 logits
     logits = hidden_relu @ params["fc2"]["weights"] + params["fc2"]["bias"]  # @：矩陣乘法 (batch, 128) × (128, 10)
-    cache["logits"] = logits
+    cache["logits"] = logits  # 存 10 類分數（尚未轉機率），切換 MSE 損失時要用
 
     # Softmax 激活函式
-    probs = softmax(logits)
-    return probs, cache
+    probs = softmax(logits)  # 把 10 個分數轉成機率，每列加總為 1
+    return probs, cache  # 回傳機率與暫存，供算 loss 與反向傳播
 
 
 def backward(upstream_gradient: np.ndarray, params: dict, cache: dict) -> None:
@@ -398,7 +398,7 @@ def predict(x: np.ndarray, params: dict) -> np.ndarray:
 # === 主程式 ===
 if __name__ == "__main__":
     # 確認 step 1 已下載所需檔案
-    missing = [f for f in REQUIRED_FILES if not os.path.isfile(f"{MNIST_DIR}/{f}")]
+    missing = [f for f in REQUIRED_FILES if not os.path.isfile(f"{MNIST_DIR}/{f}")]  # 列出缺少的 IDX 檔名
     if missing:
         print("Missing MNIST files:", ", ".join(missing))
         print("Run step_1_download_mnist.py first.")
@@ -410,10 +410,10 @@ if __name__ == "__main__":
     print("[1/5] Loading MNIST data ...")
     X_train, y_train = load_mnist_split(
         "train-images-idx3-ubyte", "train-labels-idx1-ubyte"
-    )
+    )  # 載入 60000 張訓練圖與 one-hot 標籤
     X_test, y_test = load_mnist_split(
         "t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte"
-    )
+    )  # 載入 10000 張測試圖與 one-hot 標籤
     print(f"      train: {X_train.shape[0]} samples")
     print(f"      test:  {X_test.shape[0]} samples")
     print(
@@ -424,8 +424,8 @@ if __name__ == "__main__":
     # 架構：FC(784→128) → ReLU → FC(128→10) → Softmax
     print("[2/5] Initializing model ...")
     params = {
-        "fc1": init_dense_params(INPUT_SIZE, HIDDEN_SIZE),
-        "fc2": init_dense_params(HIDDEN_SIZE, NUM_CLASSES),
+        "fc1": init_dense_params(INPUT_SIZE, HIDDEN_SIZE),  # 784→128 全連接層權重
+        "fc2": init_dense_params(HIDDEN_SIZE, NUM_CLASSES),  # 128→10 全連接層權重
     }
     print(
         f"      fc1 weights: {params['fc1']['weights'].shape}  "
@@ -433,7 +433,7 @@ if __name__ == "__main__":
     )
 
     # +BATCH_SIZE-1 再 // 是向上取整除法，最後不足一批也算一批
-    num_batches = (X_train.shape[0] + BATCH_SIZE - 1) // BATCH_SIZE
+    num_batches = (X_train.shape[0] + BATCH_SIZE - 1) // BATCH_SIZE  # 每 epoch 要跑幾批（向上取整）
     print("[3/5] Training ...")
     print(
         f"      {EPOCHS} epochs, batch_size={BATCH_SIZE}, "
@@ -441,101 +441,97 @@ if __name__ == "__main__":
     )
 
     for epoch in range(1, EPOCHS + 1):
-        total_loss = 0.0
-        total_batches = 0
-        correct = 0
-        train_total = X_train.shape[0]
+        total_loss = 0.0  # 本 epoch 累積的 loss 總和
+        total_batches = 0  # 本 epoch 已處理的批數
+        correct = 0  # 本 epoch 猜對的張數
+        train_total = X_train.shape[0]  # 訓練集總張數（60000）
 
-        batch_idx = 0
+        batch_idx = 0  # 本 epoch 目前跑到第幾批
         indices = np.arange(train_total)  # arange：產生 [0, 1, ..., train_total-1]
         np.random.shuffle(indices)  # shuffle：每 epoch 打亂樣本順序
 
         for start in range(0, train_total, BATCH_SIZE):
-            end = min(start + BATCH_SIZE, train_total)
+            end = min(start + BATCH_SIZE, train_total)  # 這批結束位置（最後一批可能不足 64 張）
             batch_indices = indices[start:end]  # 切片取出這批的索引
-            X_batch = X_train[batch_indices]
-            y_batch = y_train[batch_indices]
-            batch_idx += 1
+            X_batch = X_train[batch_indices]  # 依索引取出這批的輸入圖
+            y_batch = y_train[batch_indices]  # 依索引取出這批的 one-hot 標籤
+            batch_idx += 1  # 批數加 1
 
             for layer in ("fc1", "fc2"):
                 params[layer]["grad_weights"].fill(0)  # fill：梯度清零，準備本批累加
-                params[layer]["grad_bias"].fill(0)
+                params[layer]["grad_bias"].fill(0)  # fill：偏置梯度清零
 
-            probs, cache = forward(X_batch, params)  # 前向傳播
+            probs, cache = forward(X_batch, params)  # 前向傳播：算預測機率並暫存中間結果
 
             # --- Cross entropy（切換時註釋 MSE 區塊、取消本區註釋）---
-            loss = cross_entropy_loss(probs, y_batch)
-            upstream_gradient = cross_entropy_gradient(probs, y_batch)
+            loss = cross_entropy_loss(probs, y_batch)  # 算這批「猜錯有多嚴重」；數字越小越準
+            upstream_gradient = cross_entropy_gradient(probs, y_batch)  # 算出調整方向的起點，交給 backward 往回傳
 
-            # --- MSE on logits（當前使用）---
-            # loss = mse_loss(cache["logits"], y_batch)
-            # upstream_gradient = mse_gradient(cache["logits"], y_batch)
+            # --- MSE on logits（切換時註釋上方 Cross entropy 區塊、取消本區註釋）---
+            # loss = mse_loss(cache["logits"], y_batch)  # 均方誤差：比對分數與 one-hot 標籤的差距
+            # upstream_gradient = mse_gradient(cache["logits"], y_batch)  # MSE 對分數的梯度，作為反向起點
 
-            backward(upstream_gradient, params, cache)  # 反向傳播
-            
+            backward(upstream_gradient, params, cache)  # 反向傳播：把梯度寫入各層 grad_weights、grad_bias
+
             # 更新權重和偏置
             for layer in ("fc1", "fc2"):
-                layer_params = params[layer]
+                layer_params = params[layer]  # 取出這一層的權重、偏置與梯度
                 layer_params["weights"] -= LEARNING_RATE * layer_params["grad_weights"]  # SGD：沿梯度反方向更新權重
                 layer_params["bias"] -= LEARNING_RATE * layer_params["grad_bias"]  # SGD：沿梯度反方向更新偏置
 
-            total_loss += loss # 累加損失
-            total_batches += 1 # 累加批次數
-            # 計算本批猜對幾張
-            preds = predict(X_batch, params)  # 模型預測的 0~9
-            true_labels = np.argmax(y_batch, axis=1)  # argmax：axis=1 從 one-hot 取正確數字 0~9
-            # 計算本批猜對幾張
-            correct += np.sum(preds == true_labels)  # sum：布林 True 當 1 加總 → 本批猜對幾張
-            # 累加本批猜對幾張
+            total_loss += loss  # 把本批 loss 加進 epoch 累積
+            total_batches += 1  # 已處理批數加 1
+            preds = predict(X_batch, params)  # 用更新後的權重預測這批數字 0~9
+            true_labels = np.argmax(y_batch, axis=1)  # argmax：從 one-hot 取出每張圖的正確數字
+            correct += np.sum(preds == true_labels)  # 比對預測與正確答案，累加本批猜對張數
 
             # 每 100 批或最後一批印出進度
             if batch_idx % 100 == 0 or batch_idx == num_batches:
-                avg_loss = total_loss / total_batches # 計算平均損失
-                samples_seen = min(batch_idx * BATCH_SIZE, train_total) # 計算已看過的樣本數
-                train_acc = correct / samples_seen # 計算訓練準確率
+                avg_loss = total_loss / total_batches  # 到目前為止的平均 loss
+                samples_seen = min(batch_idx * BATCH_SIZE, train_total)  # 本 epoch 已看過幾張圖
+                train_acc = correct / samples_seen  # 到目前為止的訓練準確率
                 print(
                     f"      epoch {epoch}/{EPOCHS}  batch {batch_idx}/{num_batches}  "
-                    f"loss={loss:.4f}  avg_loss={avg_loss:.4f}  " # 計算平均損失
-                    f"train_acc={train_acc * 100:.1f}%" # 計算訓練準確率
+                    f"loss={loss:.4f}  avg_loss={avg_loss:.4f}  "
+                    f"train_acc={train_acc * 100:.1f}%"
                 )
 
-        avg_loss = total_loss / total_batches
-        train_acc = correct / train_total # 計算訓練準確率
+        avg_loss = total_loss / total_batches  # 本 epoch 全部批次的平均 loss
+        train_acc = correct / train_total  # 本 epoch 在整份訓練集上的準確率
         print(
             f"      epoch {epoch}/{EPOCHS} done  "
-            f"loss={avg_loss:.4f}  train_acc={train_acc * 100:.1f}%" # 計算訓練準確率
+            f"loss={avg_loss:.4f}  train_acc={train_acc * 100:.1f}%"
         )
 
     print("[4/5] Evaluating on test set ...")
-    test_correct = 0
-    test_total = X_test.shape[0]
-    eval_batch_size = 256 # 評估批次大小
-    test_num_batches = (test_total + eval_batch_size - 1) // eval_batch_size # 計算評估批次數
+    test_correct = 0  # 測試集猜對張數
+    test_total = X_test.shape[0]  # 測試集總張數（10000）
+    eval_batch_size = 256  # 評估時每批取幾張（不必與訓練 batch 相同）
+    test_num_batches = (test_total + eval_batch_size - 1) // eval_batch_size  # 測試集要跑幾批
 
     for batch_idx in range(test_num_batches):
-        start = batch_idx * eval_batch_size # 計算起始索引
-        end = min(start + eval_batch_size, test_total) # 計算結束索引
-        X_batch = X_test[start:end] # 取出這批的輸入
-        y_batch = y_test[start:end] # 取出這批的輸入和標籤
+        start = batch_idx * eval_batch_size  # 這批在測試集的起始索引
+        end = min(start + eval_batch_size, test_total)  # 這批結束索引（最後一批可能較短）
+        X_batch = X_test[start:end]  # 取出這批測試圖
+        y_batch = y_test[start:end]  # 取出這批 one-hot 標籤
 
-        preds = predict(X_batch, params) # 模型預測的 0~9
-        true_labels = np.argmax(y_batch, axis=1)  # argmax：axis=1 從 one-hot 取正確數字 0~9
-        test_correct += np.sum(preds == true_labels)  # sum：布林 True 當 1 加總 → 本批猜對幾張
-        # 每 100 批或最後一批印出進度
+        preds = predict(X_batch, params)  # 對測試圖做預測
+        true_labels = np.argmax(y_batch, axis=1)  # argmax：從 one-hot 取正確數字 0~9
+        test_correct += np.sum(preds == true_labels)  # 累加本批猜對張數
         print(
             f"      eval batch {batch_idx + 1}/{test_num_batches}  "
-            f"running_acc={test_correct / test_total * 100:.1f}%" # 計算評估準確率
+            f"running_acc={test_correct / test_total * 100:.1f}%"
         )
 
     print(f"      test accuracy: {test_correct / test_total * 100:.1f}%")
 
     print("[5/5] Saving weights ...")
-    os.makedirs(MODELS_DIR, exist_ok=True)
+    os.makedirs(MODELS_DIR, exist_ok=True)  # 建立 models/ 目錄（已存在不報錯）
     np.savez_compressed(  # savez_compressed：以壓縮格式將多個 ndarray 寫入單一 .npz
         WEIGHTS_PATH,
-        fc1_W=params["fc1"]["weights"],
-        fc1_b=params["fc1"]["bias"],
-        fc2_W=params["fc2"]["weights"],
-        fc2_b=params["fc2"]["bias"],
+        fc1_W=params["fc1"]["weights"],  # 第一層權重矩陣
+        fc1_b=params["fc1"]["bias"],  # 第一層偏置向量
+        fc2_W=params["fc2"]["weights"],  # 第二層權重矩陣
+        fc2_b=params["fc2"]["bias"],  # 第二層偏置向量
     )
     print(f"      Saved to {WEIGHTS_PATH}")

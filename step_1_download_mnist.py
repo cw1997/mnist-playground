@@ -73,7 +73,7 @@ def run_download() -> None:
 
         out_path = gz_path.removesuffix(".gz")  # removesuffix：去掉 .gz 副檔名，得到 IDX 原始檔名
         print("      Decompressing ...")
-        decompress_gz(gz_path, out_path)
+        decompress_gz(gz_path, out_path)  # 解壓 .gz，得到 IDX 原始二進位檔
         print(f"      Output → {out_path}")
 
     print(f"      All {total} IDX files ready in {MNIST_DIR}/")

@@ -82,7 +82,7 @@ def read_images(path: str) -> tuple[np.ndarray, int, int, int]:
     """
     with open(path, "rb") as f:
         # 大端序：magic(2051)、張數、列數、行數
-        magic, count, rows, cols = struct.unpack(">IIII", f.read(16))
+        magic, count, rows, cols = struct.unpack(">IIII", f.read(16))  # unpack：讀檔頭得張數與每張圖 28×28 的維度
         if magic != 2051:
             raise ValueError(f"unexpected magic number in {path}: {magic}")
         # 每個像素是 0～255 的整數，先讀成 uint8 再轉 float
@@ -106,7 +106,7 @@ def read_labels(path: str) -> tuple[np.ndarray, int]:
         - count：int，標籤筆數
     """
     with open(path, "rb") as f:
-        magic, count = struct.unpack(">II", f.read(8))
+        magic, count = struct.unpack(">II", f.read(8))  # unpack：讀檔頭得標籤筆數
         if magic != 2049:
             raise ValueError(f"unexpected magic number in {path}: {magic}")
         labels = np.frombuffer(f.read(count), dtype=np.uint8)  # frombuffer：將二進位 bytes 直接解讀為一維標籤陣列
@@ -130,8 +130,8 @@ def load_mnist_split(images_file: str, labels_file: str) -> tuple[np.ndarray, np
         - X：np.ndarray，形狀 ``(N, 1, 28, 28)``，像素 ÷255 再減 ``MNIST_MEAN``，dtype float64
         - y：np.ndarray，形狀 ``(N, 10)``，one-hot 編碼標籤，dtype float64
     """
-    pixels, count, rows, cols = read_images(f"{MNIST_DIR}/{images_file}")
-    labels, label_count = read_labels(f"{MNIST_DIR}/{labels_file}")
+    pixels, count, rows, cols = read_images(f"{MNIST_DIR}/{images_file}")  # 讀取圖像像素與張數、高、寬
+    labels, label_count = read_labels(f"{MNIST_DIR}/{labels_file}")  # 讀取每張圖對應的數字標籤 0~9
     if count != label_count:
         raise ValueError(
             f"mismatch: {count} images vs {label_count} labels in {images_file}"
@@ -268,10 +268,10 @@ def col2im(
         dtype=col.dtype,
     )
 
-    for ky in range(kernel_size):
-        y_max = ky + stride * out_h
-        for kx in range(kernel_size):
-            x_max = kx + stride * out_w
+    for ky in range(kernel_size):  # 沿濾鏡高度方向走訪每個位置
+        y_max = ky + stride * out_h  # 這一列 patch 在 padded 圖上的結束 y 座標
+        for kx in range(kernel_size):  # 沿濾鏡寬度方向走訪每個位置
+            x_max = kx + stride * out_w  # 這一列 patch 在 padded 圖上的結束 x 座標
             x_padded[:, :, ky:y_max:stride, kx:x_max:stride] += col[:, :, ky, kx, :, :]  # +=：同一像素可能對應多窗口，梯度加總
 
     if padding > 0:
@@ -424,15 +424,15 @@ def init_conv_params(
     W = np.random.randn(out_channels, in_channels, kernel_size, kernel_size) * scale  # randn：標準常態亂數 × scale
     b = np.zeros(out_channels, dtype=np.float64)  # zeros：建立長度 out_channels 的全 0 偏置向量
     return {
-        "W": W,
-        "b": b,
+        "W": W,  # 卷積濾鏡權重（多個小方塊在圖上滑動提取特徵）
+        "b": b,  # 每個濾鏡的偏置
         "dW": np.zeros_like(W),  # zeros_like：建立與 W 同形狀的全 0 梯度矩陣
         "db": np.zeros_like(b),  # zeros_like：建立與 b 同形狀的全 0 梯度向量
-        "in_channels": in_channels,
-        "out_channels": out_channels,
-        "kernel_size": kernel_size,
-        "stride": 1,
-        "padding": padding,
+        "in_channels": in_channels,  # 輸入通道數（灰階圖為 1）
+        "out_channels": out_channels,  # 輸出濾鏡數量
+        "kernel_size": kernel_size,  # 濾鏡邊長（例如 3×3）
+        "stride": 1,  # 滑動步幅：每次移動幾格
+        "padding": padding,  # 邊界補零圈數，避免輸出縮太小
     }
 
 
@@ -486,13 +486,13 @@ def conv_forward(x: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
         - out：np.ndarray，形狀 ``(batch, out_channels, out_h, out_w)``
         - cache：dict，含 ``"x"``、``"col"``、``"out_h"``、``"out_w"``，供反向傳播使用
     """
-    W = params["W"]
-    b = params["b"]
-    kernel_size = params["kernel_size"]
-    stride = params["stride"]
-    padding = params["padding"]
-    out_channels = params["out_channels"]
-    batch = x.shape[0]
+    W = params["W"]  # 卷積濾鏡權重
+    b = params["b"]  # 每個濾鏡的偏置
+    kernel_size = params["kernel_size"]  # 濾鏡邊長
+    stride = params["stride"]  # 滑動步幅
+    padding = params["padding"]  # 邊界補零圈數
+    out_channels = params["out_channels"]  # 輸出濾鏡數
+    batch = x.shape[0]  # 這批有幾張圖
 
     col, out_h, out_w = im2col(x, kernel_size, stride, padding)
     W_col = W.reshape(out_channels, -1)  # reshape：濾鏡攤平成 (out_ch, in*kh*kw)
@@ -500,16 +500,16 @@ def conv_forward(x: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
     # batch 向量化：col (batch, in*kh*kw, out_h*out_w)，W_col (out_ch, in*kh*kw)
     conv_out = np.einsum("oi,bil->bol", W_col, col)  # einsum：批次矩陣乘法完成卷積
     b_broadcast = b.reshape(1, -1, 1)  # reshape：偏置擴展為 (1, out_ch, 1) 方便廣播
-    out = conv_out + b_broadcast  # 加上偏置
+    out = conv_out + b_broadcast  # 每個濾鏡輸出加上對應偏置
 
     cache = {
-        "x": x,
-        "col": col,
-        "out_h": out_h,
-        "out_w": out_w,
+        "x": x,  # 原始輸入，反向時要用
+        "col": col,  # im2col 結果，反向時要用
+        "out_h": out_h,  # 輸出特徵圖高度
+        "out_w": out_w,  # 輸出特徵圖寬度
     }
     out_4d = out.reshape(batch, out_channels, out_h, out_w)  # reshape：還原為 (batch, out_ch, out_h, out_w)
-    return out_4d, cache
+    return out_4d, cache  # 回傳卷積輸出與暫存
 
 
 def conv_backward(dout: np.ndarray, params: dict, cache: dict) -> np.ndarray:
@@ -574,18 +574,18 @@ def maxpool_forward(
         - out：np.ndarray，形狀 ``(batch, channel, out_h, out_w)``
         - cache：dict，含 ``"x"``、``"max_mask"``、``"pool_size"``、``"stride"``
     """
-    batch, channel, height, width = x.shape
-    out_h = _calc_output_size(height, pool_size, stride)
-    out_w = _calc_output_size(width, pool_size, stride)
+    batch, channel, height, width = x.shape  # 解包：這批張數、通道數、高、寬
+    out_h = _calc_output_size(height, pool_size, stride)  # 池化後輸出高度
+    out_w = _calc_output_size(width, pool_size, stride)  # 池化後輸出寬度
 
-    out = np.zeros((batch, channel, out_h, out_w), dtype=np.float64)
-    max_mask = np.zeros_like(x, dtype=bool)
+    out = np.zeros((batch, channel, out_h, out_w), dtype=np.float64)  # 建立池化輸出陣列
+    max_mask = np.zeros_like(x, dtype=bool)  # 記錄每個窗口最大值位置，反向時要用
 
-    for i in range(out_h):
-        for j in range(out_w):
-            y0 = i * stride
-            x0 = j * stride
-            window = x[:, :, y0 : y0 + pool_size, x0 : x0 + pool_size]
+    for i in range(out_h):  # 沿輸出高度走訪每個池化窗口
+        for j in range(out_w):  # 沿輸出寬度走訪每個池化窗口
+            y0 = i * stride  # 這個窗口在輸入圖上的起始 y
+            x0 = j * stride  # 這個窗口在輸入圖上的起始 x
+            window = x[:, :, y0 : y0 + pool_size, x0 : x0 + pool_size]  # 切出 2×2（或 pool_size）小區塊
             window_max = np.max(window, axis=(2, 3))  # max：沿高寬維取窗口最大值
             out[:, :, i, j] = window_max  # 寫入池化輸出
             max_val = out[:, :, i, j, np.newaxis, np.newaxis]  # newaxis：擴展維度以便與 window 比較
@@ -611,18 +611,18 @@ def maxpool_backward(dout: np.ndarray, cache: dict) -> np.ndarray:
     np.ndarray
         輸入梯度，形狀與 cache 中 ``"x"`` 相同。
     """
-    x = cache["x"]
-    max_mask = cache["max_mask"]
-    pool_size = cache["pool_size"]
-    stride = cache["stride"]
-    dx = np.zeros_like(x)
-    _, _, out_h, out_w = dout.shape
+    x = cache["x"]  # 前向時的池化輸入
+    max_mask = cache["max_mask"]  # 前向時記錄的最大值位置
+    pool_size = cache["pool_size"]  # 池化窗口邊長
+    stride = cache["stride"]  # 池化步幅
+    dx = np.zeros_like(x)  # 建立與輸入同形的梯度陣列，準備回填
+    _, _, out_h, out_w = dout.shape  # 來自後層的梯度形狀
 
-    for i in range(out_h):
-        for j in range(out_w):
-            y0 = i * stride
-            x0 = j * stride
-            window_mask = max_mask[:, :, y0 : y0 + pool_size, x0 : x0 + pool_size]
+    for i in range(out_h):  # 沿池化輸出高度走訪
+        for j in range(out_w):  # 沿池化輸出寬度走訪
+            y0 = i * stride  # 對應輸入圖上的起始 y
+            x0 = j * stride  # 對應輸入圖上的起始 x
+            window_mask = max_mask[:, :, y0 : y0 + pool_size, x0 : x0 + pool_size]  # 取出這個窗口的 mask
             dout_expanded = dout[:, :, i, j, np.newaxis, np.newaxis]  # newaxis：擴展梯度至窗口大小
             grad_window = window_mask * dout_expanded  # 梯度只回傳到前向取最大值的位置
             dx[:, :, y0 : y0 + pool_size, x0 : x0 + pool_size] += grad_window  # 累加至輸入梯度
@@ -698,33 +698,33 @@ def model_forward(x: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
         - probs：np.ndarray，形狀 ``(batch, 10)``，各類別預測機率
         - cache：dict，含各層中間結果（``"conv1"``、``"c1"``、``"r1"``、``"pool1"``、``"p1"``、``"flat"``、``"f1"``、``"r3"``、``"logits"``）
     """
-    cache: dict = {}
+    cache: dict = {}  # 暫存各層中間結果，反向傳播時要用
 
-    c1, conv1_cache = conv_forward(x, params["conv1"])
-    cache["conv1"] = conv1_cache
-    cache["c1"] = c1
+    c1, conv1_cache = conv_forward(x, params["conv1"])  # 卷積：提取邊緣、筆畫等局部特徵
+    cache["conv1"] = conv1_cache  # 存卷積層暫存（im2col 等）
+    cache["c1"] = c1  # 存卷積輸出，ReLU 反向時要用
 
-    r1 = relu(c1)
-    cache["r1"] = r1
+    r1 = relu(c1)  # ReLU：負值歸零，保留正特徵
+    cache["r1"] = r1  # 存 ReLU 輸出，池化反向時要用
 
-    p1, pool1_cache = maxpool_forward(r1, pool_size=POOL_SIZE, stride=POOL_SIZE)
-    cache["pool1"] = pool1_cache
-    cache["p1"] = p1
+    p1, pool1_cache = maxpool_forward(r1, pool_size=POOL_SIZE, stride=POOL_SIZE)  # 池化：縮小尺寸、保留最強特徵
+    cache["pool1"] = pool1_cache  # 存池化 mask 等暫存
+    cache["p1"] = p1  # 存池化輸出，展平前要用
 
-    flat = p1.reshape(p1.shape[0], -1)  # reshape：-1 表示其餘維度自動計算 → (batch, flat_size)
-    cache["flat"] = flat
+    flat = p1.reshape(p1.shape[0], -1)  # reshape：把特徵圖攤平成一維向量 → (batch, flat_size)
+    cache["flat"] = flat  # 存展平結果，fc1 反向時要用
 
-    f1 = dense_forward(flat, params["fc1"])
-    cache["f1"] = f1
+    f1 = dense_forward(flat, params["fc1"])  # 全連接：3136→128
+    cache["f1"] = f1  # 存 fc1 輸出，ReLU 反向時要用
 
-    r3 = relu(f1)
-    cache["r3"] = r3
+    r3 = relu(f1)  # ReLU：隱藏層激活
+    cache["r3"] = r3  # 存隱藏層輸出，fc2 反向時要用
 
-    logits = dense_forward(r3, params["fc2"])
-    cache["logits"] = logits
+    logits = dense_forward(r3, params["fc2"])  # 全連接：128→10，輸出 10 類分數
+    cache["logits"] = logits  # 存分數（尚未轉機率）
 
-    probs = softmax(logits)
-    return probs, cache
+    probs = softmax(logits)  # 把 10 個分數轉成機率，每列加總為 1
+    return probs, cache  # 回傳機率與暫存，供算 loss 與反向傳播
 
 
 def model_backward(probs: np.ndarray, y_true: np.ndarray, params: dict, cache: dict) -> None:
@@ -746,18 +746,18 @@ def model_backward(probs: np.ndarray, y_true: np.ndarray, params: dict, cache: d
     None
         無回傳值；梯度寫入 ``params`` 各層的 ``"dW"`` 與 ``"db"``。
     """
-    dout = cross_entropy_gradient(probs, y_true)
+    dout = cross_entropy_gradient(probs, y_true)  # 交叉熵梯度：反向傳播起點
 
-    dout = dense_backward(dout, params["fc2"], cache["r3"])
-    dout = relu_backward(cache["f1"], dout)
-    dout = dense_backward(dout, params["fc1"], cache["flat"])
+    dout = dense_backward(dout, params["fc2"], cache["r3"])  # fc2 反向：梯度傳回隱藏層
+    dout = relu_backward(cache["f1"], dout)  # ReLU 反向：負值位置的梯度歸零
+    dout = dense_backward(dout, params["fc1"], cache["flat"])  # fc1 反向：梯度傳回展平向量
 
     p1_shape = cache["p1"].shape[1:]  # shape[1:]：去掉 batch 維，取得 (channel, H, W)
     dout = dout.reshape(dout.shape[0], *p1_shape)  # reshape：還原為池化輸出的 4D 形狀
 
-    dout = maxpool_backward(dout, cache["pool1"])
-    dout = relu_backward(cache["c1"], dout)
-    conv_backward(dout, params["conv1"], cache["conv1"])
+    dout = maxpool_backward(dout, cache["pool1"])  # 池化反向：梯度只回傳到前向最大值位置
+    dout = relu_backward(cache["c1"], dout)  # ReLU 反向：卷積輸出負值處梯度歸零
+    conv_backward(dout, params["conv1"], cache["conv1"])  # 卷積反向：更新 conv1 的 dW、db
 
 
 def zero_grads(params: dict) -> None:
@@ -935,10 +935,10 @@ def run_training() -> None:
     print("[1/5] Loading MNIST data ...")
     X_train, y_train = load_mnist_split(
         "train-images-idx3-ubyte", "train-labels-idx1-ubyte"
-    )
+    )  # 載入 60000 張訓練圖與 one-hot 標籤
     X_test, y_test = load_mnist_split(
         "t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte"
-    )
+    )  # 載入 10000 張測試圖與 one-hot 標籤
     print(f"      train: {X_train.shape[0]} samples")
     print(f"      test:  {X_test.shape[0]} samples")
     print(
@@ -951,11 +951,11 @@ def run_training() -> None:
     params = {
         "conv1": init_conv_params(
             1, CONV_OUT_CHANNELS, kernel_size=CONV_KERNEL_SIZE, padding=CONV_PADDING
-        ),
-        "fc1": init_dense_params(FLAT_SIZE, HIDDEN_SIZE),
-        "fc2": init_dense_params(HIDDEN_SIZE, NUM_CLASSES),
+        ),  # 第一層卷積：1→16 通道
+        "fc1": init_dense_params(FLAT_SIZE, HIDDEN_SIZE),  # 展平後→128 全連接層
+        "fc2": init_dense_params(HIDDEN_SIZE, NUM_CLASSES),  # 128→10 輸出層
     }
-    velocity = init_velocity(params)
+    velocity = init_velocity(params)  # 建立動量優化用的速度字典（與 params 同結構）
     print(
         f"      conv1 W: {params['conv1']['W'].shape}  "
         f"fc1 W: {params['fc1']['W'].shape}  "
@@ -974,57 +974,57 @@ def run_training() -> None:
         if epoch >= 4:
             print(f"      epoch {epoch}/{EPOCHS}  lr={lr}")
 
-        total_loss = 0.0
-        total_batches = 0
-        correct = 0
-        train_total = X_train.shape[0]
+        total_loss = 0.0  # 本 epoch 累積的 loss 總和
+        total_batches = 0  # 本 epoch 已處理的批數
+        correct = 0  # 本 epoch 猜對的張數
+        train_total = X_train.shape[0]  # 訓練集總張數（60000）
 
         for batch_idx, (X_batch, y_batch) in enumerate(
             iterate_minibatches(X_train, y_train, BATCH_SIZE, shuffle=True),
             start=1,
         ):
-            zero_grads(params)
-            probs, cache = model_forward(X_batch, params)
-            loss = cross_entropy_loss(probs, y_batch)
-            model_backward(probs, y_batch, params, cache)
-            update_params(params, velocity, lr, MOMENTUM)
+            zero_grads(params)  # 各層梯度清零，準備本批累加
+            probs, cache = model_forward(X_batch, params)  # 前向傳播：算預測機率並暫存中間結果
+            loss = cross_entropy_loss(probs, y_batch)  # 算這批「猜錯有多嚴重」；數字越小越準
+            model_backward(probs, y_batch, params, cache)  # 反向傳播：把梯度寫入各層 dW、db
+            update_params(params, velocity, lr, MOMENTUM)  # 動量 SGD：依梯度更新權重
 
-            total_loss += loss
-            total_batches += 1
-            preds = predict(X_batch, params)  # 模型預測的 0~9
-            true_labels = np.argmax(y_batch, axis=1)  # argmax：axis=1 從 one-hot 取正確數字 0~9
-            correct += np.sum(preds == true_labels)  # sum：布林 True 當 1 加總 → 本批猜對幾張
+            total_loss += loss  # 把本批 loss 加進 epoch 累積
+            total_batches += 1  # 已處理批數加 1
+            preds = predict(X_batch, params)  # 用更新後的權重預測這批數字 0~9
+            true_labels = np.argmax(y_batch, axis=1)  # argmax：從 one-hot 取出每張圖的正確數字
+            correct += np.sum(preds == true_labels)  # 比對預測與正確答案，累加本批猜對張數
 
             if batch_idx % 100 == 0 or batch_idx == num_batches:
-                avg_loss = total_loss / total_batches
-                samples_seen = min(batch_idx * BATCH_SIZE, train_total)
-                train_acc = correct / samples_seen
+                avg_loss = total_loss / total_batches  # 到目前為止的平均 loss
+                samples_seen = min(batch_idx * BATCH_SIZE, train_total)  # 本 epoch 已看過幾張圖
+                train_acc = correct / samples_seen  # 到目前為止的訓練準確率
                 print(
                     f"      epoch {epoch}/{EPOCHS}  batch {batch_idx}/{num_batches}  "
                     f"loss={loss:.4f}  avg_loss={avg_loss:.4f}  "
                     f"train_acc={train_acc * 100:.1f}%"
                 )
 
-        avg_loss = total_loss / total_batches
-        train_acc = correct / train_total
+        avg_loss = total_loss / total_batches  # 本 epoch 全部批次的平均 loss
+        train_acc = correct / train_total  # 本 epoch 在整份訓練集上的準確率
         print(
             f"      epoch {epoch}/{EPOCHS} done  "
             f"loss={avg_loss:.4f}  train_acc={train_acc * 100:.1f}%"
         )
 
     print("[4/5] Evaluating on test set ...")
-    test_correct = 0
-    test_total = X_test.shape[0]
-    eval_batch_size = 256
+    test_correct = 0  # 測試集猜對張數
+    test_total = X_test.shape[0]  # 測試集總張數（10000）
+    eval_batch_size = 256  # 評估時每批取幾張
     test_num_batches = (test_total + eval_batch_size - 1) // eval_batch_size  # 向上取整：測試集批數
 
     for batch_idx, (X_batch, y_batch) in enumerate(
         iterate_minibatches(X_test, y_test, eval_batch_size, shuffle=False),
         start=1,
     ):
-        preds = predict(X_batch, params)
-        true_labels = np.argmax(y_batch, axis=1)  # argmax：axis=1 從 one-hot 取正確數字 0~9
-        test_correct += np.sum(preds == true_labels)  # sum：布林 True 當 1 加總 → 本批猜對幾張
+        preds = predict(X_batch, params)  # 對測試圖做預測
+        true_labels = np.argmax(y_batch, axis=1)  # argmax：從 one-hot 取正確數字 0~9
+        test_correct += np.sum(preds == true_labels)  # 累加本批猜對張數
         if batch_idx % 100 == 0 or batch_idx == test_num_batches:
             print(
                 f"      eval batch {batch_idx}/{test_num_batches}  "
@@ -1034,8 +1034,8 @@ def run_training() -> None:
     print(f"      test accuracy: {test_correct / test_total * 100:.1f}%")
 
     print("[5/5] Saving weights ...")
-    os.makedirs(MODELS_DIR, exist_ok=True)
-    save_params(params, WEIGHTS_PATH)
+    os.makedirs(MODELS_DIR, exist_ok=True)  # 建立 models/ 目錄（已存在不報錯）
+    save_params(params, WEIGHTS_PATH)  # 將 conv1、fc1、fc2 權重寫入 .npz
     print(f"      Saved to {WEIGHTS_PATH}")
 
 

@@ -86,8 +86,8 @@ def load_params(path: str) -> dict:
     data = np.load(path)  # load：讀取 .npz 壓縮檔，回傳類似字典的物件
     return {
         "conv1": {
-            "W": data["conv1_W"],
-            "b": data["conv1_b"],
+            "W": data["conv1_W"],  # 第一層卷積權重
+            "b": data["conv1_b"],  # 第一層卷積偏置
             "in_channels": CONV_IN_CHANNELS,  # 卷積層 metadata：輸入通道數
             "out_channels": CONV_OUT_CHANNELS,  # 輸出通道數（濾鏡個數）
             "kernel_size": CONV_KERNEL_SIZE,  # 卷積核邊長
@@ -237,7 +237,7 @@ def conv_forward(x: np.ndarray, params: dict) -> np.ndarray:
     out_channels = params["out_channels"]  # 輸出通道數
     batch = x.shape[0]  # shape[0]：這批有幾張圖
 
-    col, out_h, out_w = im2col(x, kernel_size, stride, padding)
+    col, out_h, out_w = im2col(x, kernel_size, stride, padding)  # im2col：把圖切成小塊，方便用矩陣乘法做卷積
     W_col = W.reshape(out_channels, -1)  # reshape：濾鏡攤平成 (out_ch, in*kh*kw)
 
     out = np.zeros((batch, out_channels, col.shape[2]), dtype=np.float64)  # zeros：預分配輸出矩陣
@@ -389,7 +389,7 @@ def run_inference(image_path: str, weights_path: str) -> None:
     print(f"=== Inference: {image_path} ===")
 
     print("[1/5] Loading image ...")
-    tensor, original_size, mode = load_image_as_tensor(image_path)
+    tensor, original_size, mode = load_image_as_tensor(image_path)  # 讀圖並轉成 (1,1,28,28) 張量
     print(f"      Original size: {original_size[0]}×{original_size[1]}, mode: {mode}")
 
     print("[2/5] Preprocessing ...")
@@ -400,7 +400,7 @@ def run_inference(image_path: str, weights_path: str) -> None:
     )
 
     print(f"[3/5] Loading weights {weights_path} ...")
-    params = load_params(weights_path)
+    params = load_params(weights_path)  # 從 .npz 載入 conv1、fc1、fc2 權重
     print(
         f"      conv1 W: {params['conv1']['W'].shape}  "
         f"fc1 W: {params['fc1']['W'].shape}  "
@@ -408,10 +408,10 @@ def run_inference(image_path: str, weights_path: str) -> None:
     )
 
     print("[4/5] Forward pass ...")
-    probs = model_forward_verbose(tensor, params)
+    probs = model_forward_verbose(tensor, params)  # 前向推理並印出各層 shape
 
     print("[5/5] Inference result")
-    print_probs(probs)
+    print_probs(probs)  # 印出 0~9 各類機率與最高置信度預測
 
 
 # === 主程式 ===
