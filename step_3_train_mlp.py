@@ -459,12 +459,12 @@ if __name__ == "__main__":
             probs, cache = forward(X_batch, params)  # 前向傳播
 
             # --- Cross entropy（切換時註釋 MSE 區塊、取消本區註釋）---
-            # loss = cross_entropy_loss(probs, y_batch)
-            # dout = cross_entropy_gradient(probs, y_batch)
+            loss = cross_entropy_loss(probs, y_batch)
+            dout = cross_entropy_gradient(probs, y_batch)
 
             # --- MSE on logits（當前使用）---
-            loss = mse_loss(cache["logits"], y_batch)
-            dout = mse_gradient(cache["logits"], y_batch)
+            # loss = mse_loss(cache["logits"], y_batch)
+            # dout = mse_gradient(cache["logits"], y_batch)
 
             backward(dout, params, cache)  # 反向傳播
             
