@@ -381,10 +381,10 @@ flowchart LR
 1. 檢查 `mnist/` 下 4 個 IDX 檔是否存在
 2. 載入訓練集與測試集，像素正規化至 [0, 1]，標籤轉 one-hot
 3. 主程式內聯建立 `fc1`（784→128）與 `fc2`（128→10）權重字典
-4. 逐 epoch 打亂索引、切 mini-batch，執行梯度清零 → `forward` → 交叉熵損失 → `backward` → SGD 更新權重（皆內聯於主程式）
+4. 逐 epoch 打亂索引、切 mini-batch，執行梯度清零 → `forward` → **MSE 損失**（logits 對 one-hot）→ 計算梯度 → `backward` → SGD 更新權重（皆內聯於主程式）；訓練迴圈內以註釋區塊保留交叉熵路徑，可切換 `cross_entropy_loss`／`cross_entropy_gradient`
 5. 每 epoch 結束印摘要；主程式內聯分批評估測試集準確率；最後以 `np.savez_compressed` 寫入 `models/mlp.npz`
 
-**預期輸出範例**
+**預期輸出範例**（`loss` 數值隨損失函式而異；以下為 MSE 預設路徑）
 
 ```
 === MLP Training ===
@@ -396,9 +396,9 @@ flowchart LR
       fc1 W: (784, 128)  fc2 W: (128, 10)
 [3/5] Training ...
       100 epochs, batch_size=64, 938 batches/epoch, lr=0.01
-      epoch 1/100  batch 100/938  loss=0.6200  avg_loss=0.7800  train_acc=78.5%
+      epoch 1/100  batch 100/938  loss=0.0850  avg_loss=0.1200  train_acc=78.5%
       ...
-      epoch 1/100 done  loss=0.4500  train_acc=87.5%
+      epoch 1/100 done  loss=0.0650  train_acc=87.5%
       ...
 [4/5] Evaluating on test set ...
       eval batch 40/40  running_acc=93.1%
@@ -429,9 +429,7 @@ def forward(x, params):
     logits = r1 @ params["fc2"]["W"] + params["fc2"]["b"]  # (batch, 10)
     return softmax(logits), cache
 
-def backward(probs, y_true, params, cache):
-    batch = y_true.shape[0]
-    dout = (probs - y_true) / batch
+def backward(dout, params, cache):
     params["fc2"]["dW"] += cache["r1"].T @ dout
     params["fc2"]["db"] += np.sum(dout, axis=0)
     dout = dout @ params["fc2"]["W"].T
@@ -440,9 +438,36 @@ def backward(probs, y_true, params, cache):
     params["fc1"]["db"] += np.sum(dout, axis=0)
 ```
 
-整網前向／反向各一函式，激活（`relu`、`softmax`）與損失（`cross_entropy_loss`）仍獨立。反向傳播只有兩層全連接 + 一個 ReLU，是理解鏈式法則最簡單的起點。學會後再讀 CNN 版，只需額外理解卷積與池化的 forward／backward。
+整網前向／反向各一函式，激活（`relu`、`softmax`）與損失仍獨立。`backward` 接收外部計算好的 `dout`（對 logits 的梯度），訓練迴圈內以註釋區塊在 MSE 與交叉熵之間切換。反向傳播只有兩層全連接 + 一個 ReLU，是理解鏈式法則最簡單的起點。學會後再讀 CNN 版，只需額外理解卷積與池化的 forward／backward。
 
-**`cross_entropy_loss` 逐步拆解**
+**`mse_loss`／`mse_gradient`（預設訓練路徑）**
+
+MSE 直接比較最後一層 logits 與 one-hot 標籤，不需經 softmax 算 loss；梯度也直接對 logits 求導：
+
+```python
+def mse_loss(logits, y_true):
+    return float(np.mean((logits - y_true) ** 2))
+
+def mse_gradient(logits, y_true):
+    batch, num_classes = y_true.shape
+    return 2.0 * (logits - y_true) / (batch * num_classes)
+```
+
+訓練迴圈切換範例：
+
+```python
+# --- Cross entropy（切換時註釋 MSE 區塊、取消本區註釋）---
+# loss = cross_entropy_loss(probs, y_batch)
+# dout = cross_entropy_gradient(probs, y_batch)
+
+# --- MSE on logits（當前使用）---
+loss = mse_loss(cache["logits"], y_batch)
+dout = mse_gradient(cache["logits"], y_batch)
+
+backward(dout, params, cache)
+```
+
+**`cross_entropy_loss` 逐步拆解**（保留函式，註釋切換即可還原）
 
 交叉熵需要取出「每張圖對**正確數字**的預測機率」，再用 `-ln` 衡量差距。最難懂的是 NumPy 的**高級索引**——用兩組索引同時指定列與欄：
 
@@ -466,7 +491,7 @@ def cross_entropy_loss(probs, y_true):
 
 1. **先 MLP 後 CNN**：把 784 個像素直接當特徵，讓讀者專注於梯度下降與反向傳播，不被卷積細節分散注意力。
 2. **純函式 + 字典**：與 CNN 版相同風格，`params["fc1"]["W"]` 存放隱藏層權重。
-3. **整網 forward／backward**：激活與損失仍獨立，但兩層全連接與 ReLU 的鏈式法則集中在單一函式，方便對照閱讀。
+3. **整網 forward／backward**：激活與損失仍獨立；損失函式可透過註釋區塊在 MSE 與交叉熵間切換，`backward` 統一接收 `dout`。
 4. **單檔自包含**：資料讀取、激活函式、訓練迴圈全在同一檔案，方便對照 README 學習。
 
 ### step_3_train_cnn.py

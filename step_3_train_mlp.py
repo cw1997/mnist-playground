@@ -131,7 +131,7 @@ def load_mnist_split(images_file: str, labels_file: str) -> tuple[np.ndarray, np
     X = X / 255.0  # 除以 255，把 0~255 縮放到 0~1，讓梯度更新更穩定
 
     # one-hot：把類別數字（例如 3）變成 [0,0,0,1,0,0,0,0,0,0]，請注意這裡的1在從0開始計算的第3個位置上
-    # 交叉熵損失需要one-hot這種格式來比較「預測機率」與「正確答案」
+    # 交叉熵或 MSE 皆需 one-hot，才能與模型輸出逐類別比較
     y = np.zeros((count, NUM_CLASSES), dtype=np.float64)  # zeros：建立 (樣本數, 10) 的全 0 矩陣
     row_idx = np.arange(count)  # arange：產生 [0, 1, ..., count-1]，作為每張圖的列索引
     y[row_idx, labels] = 1.0  # labels[i] 是第 i 張圖的數字；在該欄設 1
@@ -141,8 +141,9 @@ def load_mnist_split(images_file: str, labels_file: str) -> tuple[np.ndarray, np
 
 # === 激活函式與損失 ===
 # ReLU：負值變 0，正值保留。簡單且能緩解梯度消失。
-# Softmax：把 10 個分數轉成機率（加總為 1）。
-# 交叉熵：衡量預測機率與正確答案的差距。
+# Softmax：把 10 個分數轉成機率（加總為 1）；推理時用於取 argmax。
+# 交叉熵：衡量 softmax 機率與 one-hot 標籤的差距（訓練迴圈可切換）。
+# MSE：衡量 logits 與 one-hot 標籤的均方誤差（訓練迴圈預設使用）。
 
 
 def relu(x: np.ndarray) -> np.ndarray:
@@ -206,6 +207,62 @@ def cross_entropy_loss(probs: np.ndarray, y_true: np.ndarray) -> float:
     sum_log_probs = np.sum(log_probs)  # sum：加總這批所有樣本的 log 機率
     avg_log_prob = sum_log_probs / batch  # 除以 batch 取平均
     return float(-avg_log_prob)  # 取負值得交叉熵（預測越準 loss 越小）
+
+
+def cross_entropy_gradient(probs: np.ndarray, y_true: np.ndarray) -> np.ndarray:
+    """softmax + 交叉熵合併後對 logits 的梯度，為反向傳播起點。
+
+    參數
+    ----
+    probs : np.ndarray
+        softmax 機率，形狀 ``(batch, num_classes)``。
+    y_true : np.ndarray
+        one-hot 標籤，形狀 ``(batch, num_classes)``。
+
+    回傳
+    ----
+    np.ndarray
+        梯度，形狀 ``(batch, num_classes)``，公式為 ``(probs - y_true) / batch``。
+    """
+    batch = y_true.shape[0]  # shape[0]：這批樣本數
+    return (probs - y_true) / batch  # 預測機率減 one-hot 標籤，再除以 batch 取平均
+
+
+def mse_loss(logits: np.ndarray, y_true: np.ndarray) -> float:
+    """計算 logits 與 one-hot 標籤的均方誤差（全元素平均）。
+
+    參數
+    ----
+    logits : np.ndarray
+        最後一層輸出分數，形狀 ``(batch, num_classes)``。
+    y_true : np.ndarray
+        one-hot 標籤，形狀 ``(batch, num_classes)``。
+
+    回傳
+    ----
+    float
+        標量 loss 值；預測越準，loss 越小。
+    """
+    return float(np.mean((logits - y_true) ** 2))  # mean：全元素平均平方差
+
+
+def mse_gradient(logits: np.ndarray, y_true: np.ndarray) -> np.ndarray:
+    """MSE 對 logits 的梯度，為反向傳播起點。
+
+    參數
+    ----
+    logits : np.ndarray
+        最後一層輸出分數，形狀 ``(batch, num_classes)``。
+    y_true : np.ndarray
+        one-hot 標籤，形狀 ``(batch, num_classes)``。
+
+    回傳
+    ----
+    np.ndarray
+        梯度，形狀 ``(batch, num_classes)``，與 ``mse_loss`` 的 ``np.mean`` 定義一致。
+    """
+    batch, num_classes = y_true.shape  # shape：這批樣本數與類別數
+    return 2.0 * (logits - y_true) / (batch * num_classes)  # MSE 對 logits 的偏導數
 
 
 # === 參數初始化 ===
@@ -283,15 +340,14 @@ def forward(x: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
     return probs, cache
 
 
-def backward(probs: np.ndarray, y_true: np.ndarray, params: dict, cache: dict) -> None:
-    """從 softmax+交叉熵梯度開始，逐層反向傳播，梯度寫入 params 的 dW、db。
+def backward(dout: np.ndarray, params: dict, cache: dict) -> None:
+    """從 fc2 輸出（logits）的梯度開始，逐層反向傳播，梯度寫入 params 的 dW、db。
 
     參數
     ----
-    probs : np.ndarray
-        前向傳播的 softmax 機率，形狀 ``(batch, 10)``。
-    y_true : np.ndarray
-        one-hot 標籤，形狀 ``(batch, 10)``。
+    dout : np.ndarray
+        損失對 logits 的梯度，形狀 ``(batch, 10)``；由 ``mse_gradient`` 或
+        ``cross_entropy_gradient`` 計算。
     params : dict
         模型參數字典（``"fc1"``、``"fc2"``）；各層 ``"dW"``、``"db"`` 原地累加。
     cache : dict
@@ -302,9 +358,6 @@ def backward(probs: np.ndarray, y_true: np.ndarray, params: dict, cache: dict) -
     None
         無回傳值；梯度寫入 ``params`` 各層的 ``"dW"`` 與 ``"db"``。
     """
-    batch = y_true.shape[0]  # shape[0]：這批樣本數
-    dout = (probs - y_true) / batch  # softmax+交叉熵合併梯度，反向傳播起點
-
     # fc2 反向：y = x @ W + b
     params["fc2"]["dW"] += cache["r1"].T @ dout  # T：轉置；@：(128, batch) × (batch, 10)
     params["fc2"]["db"] += np.sum(dout, axis=0)  # sum：沿 batch 維加總 → (10,)
@@ -403,9 +456,17 @@ if __name__ == "__main__":
                 params[layer]["dW"].fill(0)  # fill：梯度清零，準備本批累加
                 params[layer]["db"].fill(0)
 
-            probs, cache = forward(X_batch, params) # 前向傳播
-            loss = cross_entropy_loss(probs, y_batch) # 交叉熵損失
-            backward(probs, y_batch, params, cache) # 反向傳播
+            probs, cache = forward(X_batch, params)  # 前向傳播
+
+            # --- Cross entropy（切換時註釋 MSE 區塊、取消本區註釋）---
+            # loss = cross_entropy_loss(probs, y_batch)
+            # dout = cross_entropy_gradient(probs, y_batch)
+
+            # --- MSE on logits（當前使用）---
+            loss = mse_loss(cache["logits"], y_batch)
+            dout = mse_gradient(cache["logits"], y_batch)
+
+            backward(dout, params, cache)  # 反向傳播
             
             # 更新權重和偏置
             for layer in ("fc1", "fc2"):
