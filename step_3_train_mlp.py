@@ -324,18 +324,23 @@ def forward(x: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
     """
     cache: dict = {}
 
+    # 把二維影像的像素點展平成一維，變成 784 維的向量
     flat = x.reshape(x.shape[0], -1)  # reshape：-1 表示其餘維度自動計算 → (batch, 784)
     cache["flat"] = flat
 
+    # 第一層全連接層，784 維的向量乘以 128 維的權重，加上 128 維的偏置，得到 128 維的向量 f1 = w @x + b
     f1 = flat @ params["fc1"]["W"] + params["fc1"]["b"]  # @：矩陣乘法 (batch, 784) × (784, 128)
     cache["f1"] = f1
 
+    # ReLU 激活函式，把負值變成 0，正值不變
     r1 = relu(f1)
     cache["r1"] = r1
 
+    # 最後一層輸出分數（logits），128 維的向量乘以 10 維的權重，加上 10 維的偏置，得到 10 維的向量 logits = w @ x + b
     logits = r1 @ params["fc2"]["W"] + params["fc2"]["b"]  # @：矩陣乘法 (batch, 128) × (128, 10)
     cache["logits"] = logits
 
+    # Softmax 激活函式
     probs = softmax(logits)
     return probs, cache
 
