@@ -393,7 +393,7 @@ flowchart LR
       test:  10000 samples
       shape: (60000, 1, 28, 28), normalized [0, 1]
 [2/5] Initializing model ...
-      fc1 W: (784, 128)  fc2 W: (128, 10)
+      fc1 weights: (784, 128)  fc2 weights: (128, 10)
 [3/5] Training ...
       100 epochs, batch_size=64, 938 batches/epoch, lr=0.01
       epoch 1/100  batch 100/938  loss=0.0850  avg_loss=0.1200  train_acc=78.5%
@@ -423,22 +423,22 @@ flowchart LR
 
 ```python
 def forward(x, params):
-    flat = x.reshape(x.shape[0], -1)              # (batch, 784)
-    f1 = flat @ params["fc1"]["W"] + params["fc1"]["b"]  # (batch, 128)
-    r1 = relu(f1)
-    logits = r1 @ params["fc2"]["W"] + params["fc2"]["b"]  # (batch, 10)
+    flattened_input = x.reshape(x.shape[0], -1)              # (batch, 784)
+    hidden_linear = flattened_input @ params["fc1"]["weights"] + params["fc1"]["bias"]  # (batch, 128)
+    hidden_relu = relu(hidden_linear)
+    logits = hidden_relu @ params["fc2"]["weights"] + params["fc2"]["bias"]  # (batch, 10)
     return softmax(logits), cache
 
-def backward(dout, params, cache):
-    params["fc2"]["dW"] += cache["r1"].T @ dout
-    params["fc2"]["db"] += np.sum(dout, axis=0)
-    dout = dout @ params["fc2"]["W"].T
-    dout = dout * (cache["f1"] > 0)             # ReLU 反向遮罩
-    params["fc1"]["dW"] += cache["flat"].T @ dout
-    params["fc1"]["db"] += np.sum(dout, axis=0)
+def backward(upstream_gradient, params, cache):
+    params["fc2"]["grad_weights"] += cache["hidden_relu"].T @ upstream_gradient
+    params["fc2"]["grad_bias"] += np.sum(upstream_gradient, axis=0)
+    upstream_gradient = upstream_gradient @ params["fc2"]["weights"].T
+    upstream_gradient = upstream_gradient * (cache["hidden_linear"] > 0)  # ReLU 反向遮罩
+    params["fc1"]["grad_weights"] += cache["flattened_input"].T @ upstream_gradient
+    params["fc1"]["grad_bias"] += np.sum(upstream_gradient, axis=0)
 ```
 
-整網前向／反向各一函式，激活（`relu`、`softmax`）與損失仍獨立。`backward` 接收外部計算好的 `dout`（對 logits 的梯度），訓練迴圈內以註釋區塊在 MSE 與交叉熵之間切換。反向傳播只有兩層全連接 + 一個 ReLU，是理解鏈式法則最簡單的起點。學會後再讀 CNN 版，只需額外理解卷積與池化的 forward／backward。
+整網前向／反向各一函式，激活（`relu`、`softmax`）與損失仍獨立。`backward` 接收外部計算好的 `upstream_gradient`（對 logits 的梯度），訓練迴圈內以註釋區塊在 MSE 與交叉熵之間切換。反向傳播只有兩層全連接 + 一個 ReLU，是理解鏈式法則最簡單的起點。學會後再讀 CNN 版，只需額外理解卷積與池化的 forward／backward。
 
 **`mse_loss`／`mse_gradient`（預設訓練路徑）**
 
@@ -458,13 +458,13 @@ def mse_gradient(logits, y_true):
 ```python
 # --- Cross entropy（切換時註釋 MSE 區塊、取消本區註釋）---
 # loss = cross_entropy_loss(probs, y_batch)
-# dout = cross_entropy_gradient(probs, y_batch)
+# upstream_gradient = cross_entropy_gradient(probs, y_batch)
 
 # --- MSE on logits（當前使用）---
 loss = mse_loss(cache["logits"], y_batch)
-dout = mse_gradient(cache["logits"], y_batch)
+upstream_gradient = mse_gradient(cache["logits"], y_batch)
 
-backward(dout, params, cache)
+backward(upstream_gradient, params, cache)
 ```
 
 **`cross_entropy_loss` 逐步拆解**（保留函式，註釋切換即可還原）
@@ -490,8 +490,8 @@ def cross_entropy_loss(probs, y_true):
 #### 設計要點
 
 1. **先 MLP 後 CNN**：把 784 個像素直接當特徵，讓讀者專注於梯度下降與反向傳播，不被卷積細節分散注意力。
-2. **純函式 + 字典**：與 CNN 版相同風格，`params["fc1"]["W"]` 存放隱藏層權重。
-3. **整網 forward／backward**：激活與損失仍獨立；損失函式可透過註釋區塊在 MSE 與交叉熵間切換，`backward` 統一接收 `dout`。
+2. **純函式 + 字典**：與 CNN 版相同風格，`params["fc1"]["weights"]` 存放隱藏層權重。
+3. **整網 forward／backward**：激活與損失仍獨立；損失函式可透過註釋區塊在 MSE 與交叉熵間切換，`backward` 統一接收 `upstream_gradient`。
 4. **單檔自包含**：資料讀取、激活函式、訓練迴圈全在同一檔案，方便對照 README 學習。
 
 ### step_3_train_cnn.py

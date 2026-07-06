@@ -178,9 +178,9 @@ def softmax(x: np.ndarray) -> np.ndarray:
         機率分布，形狀 ``(batch, num_classes)``，每列加總為 1。
     """
     shifted = x - np.max(x, axis=1, keepdims=True)  # max：axis=1 每列取最大；keepdims 保留維度方便相減
-    exp_x = np.exp(shifted)  # exp：對每個分數取 e 的次方
-    sum_exp = np.sum(exp_x, axis=1, keepdims=True)  # sum：axis=1 每列加總，keepdims 保留維度方便相除
-    return exp_x / sum_exp  # 逐元素相除，每列機率加總為 1
+    exponentiated_scores = np.exp(shifted)  # exp：對每個分數取 e 的次方
+    sum_exponentiated = np.sum(exponentiated_scores, axis=1, keepdims=True)  # sum：axis=1 每列加總，keepdims 保留維度方便相除
+    return exponentiated_scores / sum_exponentiated  # 逐元素相除，每列機率加總為 1
 
 
 def cross_entropy_loss(probs: np.ndarray, y_true: np.ndarray) -> float:
@@ -266,7 +266,7 @@ def mse_gradient(logits: np.ndarray, y_true: np.ndarray) -> np.ndarray:
 
 
 # === 參數初始化 ===
-# 不用 class，改以字典存放每層權重 W、bias b，以及梯度 dW、db。
+# 不用 class，改以字典存放每層 weights、bias，以及梯度 grad_weights、grad_bias。
 
 
 def init_dense_params(in_features: int, out_features: int) -> dict:
@@ -283,19 +283,19 @@ def init_dense_params(in_features: int, out_features: int) -> dict:
     ----
     dict
         全連接層參數字典，含：
-        - ``"W"``：np.ndarray，形狀 ``(in_features, out_features)``
-        - ``"b"``：np.ndarray，形狀 ``(out_features,)``
-        - ``"dW"``：np.ndarray，與 ``"W"`` 同形，梯度累積用，初始全 0
-        - ``"db"``：np.ndarray，與 ``"b"`` 同形，梯度累積用，初始全 0
+        - ``"weights"``：np.ndarray，形狀 ``(in_features, out_features)``
+        - ``"bias"``：np.ndarray，形狀 ``(out_features,)``
+        - ``"grad_weights"``：np.ndarray，與 ``"weights"`` 同形，梯度累積用，初始全 0
+        - ``"grad_bias"``：np.ndarray，與 ``"bias"`` 同形，梯度累積用，初始全 0
     """
     scale = np.sqrt(2.0 / (in_features + out_features))  # sqrt：開平方根，得 Xavier 縮放因子
-    W = np.random.randn(in_features, out_features) * scale  # randn：產生標準常態亂數，再乘以 scale
-    b = np.zeros(out_features, dtype=np.float64)  # zeros：建立長度 out_features 的全 0 偏置向量
+    weights = np.random.randn(in_features, out_features) * scale  # randn：產生標準常態亂數，再乘以 scale
+    bias = np.zeros(out_features, dtype=np.float64)  # zeros：建立長度 out_features 的全 0 偏置向量
     return {
-        "W": W,
-        "b": b,
-        "dW": np.zeros_like(W),  # zeros_like：建立與 W 同形狀的全 0 梯度矩陣
-        "db": np.zeros_like(b),  # zeros_like：建立與 b 同形狀的全 0 梯度向量
+        "weights": weights,
+        "bias": bias,
+        "grad_weights": np.zeros_like(weights),  # zeros_like：建立與 weights 同形狀的全 0 梯度矩陣
+        "grad_bias": np.zeros_like(bias),  # zeros_like：建立與 bias 同形狀的全 0 梯度向量
     }
 
 
@@ -320,24 +320,24 @@ def forward(x: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
     tuple[np.ndarray, dict]
         二元組，依序為：
         - probs：np.ndarray，形狀 ``(batch, 10)``，各類別預測機率
-        - cache：dict，前向中間結果，含 ``"flat"``、``"f1"``、``"r1"``、``"logits"``
+        - cache：dict，前向中間結果，含 ``"flattened_input"``、``"hidden_linear"``、``"hidden_relu"``、``"logits"``
     """
     cache: dict = {}
 
     # 把二維影像的像素點展平成一維，變成 784 維的向量
-    flat = x.reshape(x.shape[0], -1)  # reshape：-1 表示其餘維度自動計算 → (batch, 784)
-    cache["flat"] = flat
+    flattened_input = x.reshape(x.shape[0], -1)  # reshape：-1 表示其餘維度自動計算 → (batch, 784)
+    cache["flattened_input"] = flattened_input
 
-    # 第一層全連接層，784 維的向量乘以 128 維的權重，加上 128 維的偏置，得到 128 維的向量 f1 = w @x + b
-    f1 = flat @ params["fc1"]["W"] + params["fc1"]["b"]  # @：矩陣乘法 (batch, 784) × (784, 128)
-    cache["f1"] = f1
+    # 第一層全連接層，784 維的向量乘以 128 維的權重，加上 128 維的偏置，得到 128 維的 hidden_linear
+    hidden_linear = flattened_input @ params["fc1"]["weights"] + params["fc1"]["bias"]  # @：矩陣乘法 (batch, 784) × (784, 128)
+    cache["hidden_linear"] = hidden_linear
 
     # ReLU 激活函式，把負值變成 0，正值不變
-    r1 = relu(f1)
-    cache["r1"] = r1
+    hidden_relu = relu(hidden_linear)
+    cache["hidden_relu"] = hidden_relu
 
-    # 最後一層輸出分數（logits），128 維的向量乘以 10 維的權重，加上 10 維的偏置，得到 10 維的向量 logits = w @ x + b
-    logits = r1 @ params["fc2"]["W"] + params["fc2"]["b"]  # @：矩陣乘法 (batch, 128) × (128, 10)
+    # 最後一層輸出分數（logits），128 維的向量乘以 10 維的權重，加上 10 維的偏置，得到 10 維的 logits
+    logits = hidden_relu @ params["fc2"]["weights"] + params["fc2"]["bias"]  # @：矩陣乘法 (batch, 128) × (128, 10)
     cache["logits"] = logits
 
     # Softmax 激活函式
@@ -345,35 +345,35 @@ def forward(x: np.ndarray, params: dict) -> tuple[np.ndarray, dict]:
     return probs, cache
 
 
-def backward(dout: np.ndarray, params: dict, cache: dict) -> None:
-    """從 fc2 輸出（logits）的梯度開始，逐層反向傳播，梯度寫入 params 的 dW、db。
+def backward(upstream_gradient: np.ndarray, params: dict, cache: dict) -> None:
+    """從 fc2 輸出（logits）的梯度開始，逐層反向傳播，梯度寫入 params 的 grad_weights、grad_bias。
 
     參數
     ----
-    dout : np.ndarray
+    upstream_gradient : np.ndarray
         損失對 logits 的梯度，形狀 ``(batch, 10)``；由 ``mse_gradient`` 或
         ``cross_entropy_gradient`` 計算。
     params : dict
-        模型參數字典（``"fc1"``、``"fc2"``）；各層 ``"dW"``、``"db"`` 原地累加。
+        模型參數字典（``"fc1"``、``"fc2"``）；各層 ``"grad_weights"``、``"grad_bias"`` 原地累加。
     cache : dict
-        ``forward`` 回傳的中間結果，含 ``"flat"``、``"f1"``、``"r1"``。
+        ``forward`` 回傳的中間結果，含 ``"flattened_input"``、``"hidden_linear"``、``"hidden_relu"``。
 
     回傳
     ----
     None
-        無回傳值；梯度寫入 ``params`` 各層的 ``"dW"`` 與 ``"db"``。
+        無回傳值；梯度寫入 ``params`` 各層的 ``"grad_weights"`` 與 ``"grad_bias"``。
     """
-    # fc2 反向：y = x @ W + b
-    params["fc2"]["dW"] += cache["r1"].T @ dout  # T：轉置；@：(128, batch) × (batch, 10)
-    params["fc2"]["db"] += np.sum(dout, axis=0)  # sum：沿 batch 維加總 → (10,)
-    dout = dout @ params["fc2"]["W"].T  # @：梯度傳回 fc2 輸入 → (batch, 128)
+    # fc2 反向：output = input @ weights + bias
+    params["fc2"]["grad_weights"] += cache["hidden_relu"].T @ upstream_gradient  # T：轉置；@：(128, batch) × (batch, 10)
+    params["fc2"]["grad_bias"] += np.sum(upstream_gradient, axis=0)  # sum：沿 batch 維加總 → (10,)
+    upstream_gradient = upstream_gradient @ params["fc2"]["weights"].T  # @：梯度傳回 fc2 輸入 → (batch, 128)
 
     # ReLU 反向：前向輸入 <=0 的位置梯度歸零
-    dout = dout * (cache["f1"] > 0)  # 布林遮罩逐元素相乘，向量化實作
+    upstream_gradient = upstream_gradient * (cache["hidden_linear"] > 0)  # 布林遮罩逐元素相乘，向量化實作
 
     # fc1 反向
-    params["fc1"]["dW"] += cache["flat"].T @ dout  # T：轉置；@：(784, batch) × (batch, 128)
-    params["fc1"]["db"] += np.sum(dout, axis=0)  # sum：沿 batch 維加總 → (128,)
+    params["fc1"]["grad_weights"] += cache["flattened_input"].T @ upstream_gradient  # T：轉置；@：(784, batch) × (batch, 128)
+    params["fc1"]["grad_bias"] += np.sum(upstream_gradient, axis=0)  # sum：沿 batch 維加總 → (128,)
 
 
 def predict(x: np.ndarray, params: dict) -> np.ndarray:
@@ -428,8 +428,8 @@ if __name__ == "__main__":
         "fc2": init_dense_params(HIDDEN_SIZE, NUM_CLASSES),
     }
     print(
-        f"      fc1 W: {params['fc1']['W'].shape}  "
-        f"fc2 W: {params['fc2']['W'].shape}"
+        f"      fc1 weights: {params['fc1']['weights'].shape}  "
+        f"fc2 weights: {params['fc2']['weights'].shape}"
     )
 
     # +BATCH_SIZE-1 再 // 是向上取整除法，最後不足一批也算一批
@@ -458,26 +458,26 @@ if __name__ == "__main__":
             batch_idx += 1
 
             for layer in ("fc1", "fc2"):
-                params[layer]["dW"].fill(0)  # fill：梯度清零，準備本批累加
-                params[layer]["db"].fill(0)
+                params[layer]["grad_weights"].fill(0)  # fill：梯度清零，準備本批累加
+                params[layer]["grad_bias"].fill(0)
 
             probs, cache = forward(X_batch, params)  # 前向傳播
 
             # --- Cross entropy（切換時註釋 MSE 區塊、取消本區註釋）---
             loss = cross_entropy_loss(probs, y_batch)
-            dout = cross_entropy_gradient(probs, y_batch)
+            upstream_gradient = cross_entropy_gradient(probs, y_batch)
 
             # --- MSE on logits（當前使用）---
             # loss = mse_loss(cache["logits"], y_batch)
-            # dout = mse_gradient(cache["logits"], y_batch)
+            # upstream_gradient = mse_gradient(cache["logits"], y_batch)
 
-            backward(dout, params, cache)  # 反向傳播
+            backward(upstream_gradient, params, cache)  # 反向傳播
             
             # 更新權重和偏置
             for layer in ("fc1", "fc2"):
-                p = params[layer]
-                p["W"] -= LEARNING_RATE * p["dW"]  # SGD：沿梯度反方向更新權重
-                p["b"] -= LEARNING_RATE * p["db"] # SGD：沿梯度反方向更新偏置
+                layer_params = params[layer]
+                layer_params["weights"] -= LEARNING_RATE * layer_params["grad_weights"]  # SGD：沿梯度反方向更新權重
+                layer_params["bias"] -= LEARNING_RATE * layer_params["grad_bias"]  # SGD：沿梯度反方向更新偏置
 
             total_loss += loss # 累加損失
             total_batches += 1 # 累加批次數
@@ -533,9 +533,9 @@ if __name__ == "__main__":
     os.makedirs(MODELS_DIR, exist_ok=True)
     np.savez_compressed(  # savez_compressed：以壓縮格式將多個 ndarray 寫入單一 .npz
         WEIGHTS_PATH,
-        fc1_W=params["fc1"]["W"],
-        fc1_b=params["fc1"]["b"],
-        fc2_W=params["fc2"]["W"],
-        fc2_b=params["fc2"]["b"],
+        fc1_W=params["fc1"]["weights"],
+        fc1_b=params["fc1"]["bias"],
+        fc2_W=params["fc2"]["weights"],
+        fc2_b=params["fc2"]["bias"],
     )
     print(f"      Saved to {WEIGHTS_PATH}")
